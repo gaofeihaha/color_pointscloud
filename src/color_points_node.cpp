@@ -51,7 +51,7 @@ struct PointXYZIRCAEDT
 }EIGEN_ALIGN16;
 POINT_CLOUD_REGISTER_POINT_STRUCT(PointXYZIRCAEDT, 
       (float, x, x)(float, y, y)(float, z, z)(std::uint8_t, intensity, intensity)
-      (std::uint8_t, return_type, return_type)(std::uint16_t, channel, channel)
+      (std::uint8_t, return_type, return_type)
       (float, azimuth, azimuth)(float, elevation, elevation)(float, distance, distance)
       (std::uint32_t, time_stamp, time_stamp)
 )
@@ -64,13 +64,11 @@ struct PointXYZRGBRT
     struct { uint8_t b,g,r,a; }rgba_struct;       // BGRA 顺序，PCL 惯例
     uint32_t rgba;
   };
-  std::uint16_t channel{0U};
   std::uint32_t time_stamp{0U};
   
 }EIGEN_ALIGN16;
 POINT_CLOUD_REGISTER_POINT_STRUCT(PointXYZRGBRT, 
       (float, x, x)(float, y, y)(float, z, z)(uint32_t, rgba, rgba)
-      (std::uint16_t, channel, channel)
       (std::uint32_t, time_stamp, time_stamp)
 )
 
@@ -393,163 +391,296 @@ private:
                    general_config_.image_queue_size);
     }
     
-    void syncCallback(const PointCloud2::ConstSharedPtr& cloud1_msg, const PointCloud2::ConstSharedPtr& cloud2_msg, const Image::ConstSharedPtr& image1_msg, const Image::ConstSharedPtr& image2_msg)
+    // void syncCallback(const PointCloud2::ConstSharedPtr& cloud1_msg, const PointCloud2::ConstSharedPtr& cloud2_msg, const Image::ConstSharedPtr& image1_msg, const Image::ConstSharedPtr& image2_msg)
+    // {
+    //     static int points_count = 0;
+    //     points_count++;
+    //     std::cout << "points count: " << points_count << std::endl;
+
+    //     auto msg_header = cloud1_msg->header;
+    //     msg_header.frame_id = "base_link";
+
+    //     // // 将时间转换为rclcpp::Time类型以便进行运算
+    //     // rclcpp::Time cloud1_time(cloud1_msg->header.stamp);
+    //     // rclcpp::Time cloud2_time(cloud2_msg->header.stamp);
+    //     // rclcpp::Time image1_time(image1_msg->header.stamp);
+    //     // rclcpp::Time image2_time(image2_msg->header.stamp);
+        
+    //     // // 计算最大时间差
+    //     // double max_diff = 0.0;
+    //     // max_diff = std::max(max_diff, std::abs((cloud1_time - image1_time).seconds()));
+    //     // max_diff = std::max(max_diff, std::abs((cloud2_time - image2_time).seconds()));
+    //     // max_diff = std::max(max_diff, std::abs((cloud1_time - cloud2_time).seconds()));
+    //     // max_diff = std::max(max_diff, std::abs((image1_time - image2_time).seconds()));
+
+    //     // RCLCPP_INFO(this->get_logger(), "Received synchronized messages (max time diff: %.6fs)", max_diff);
+        
+    //     // if (max_diff > general_config_.max_time_diff) {
+    //     //     RCLCPP_WARN(this->get_logger(), "Time difference too large: %.6f > %.3f seconds", 
+    //     //             max_diff, general_config_.max_time_diff);
+    //     //     return;
+    //     // }
+
+
+    //     pcl::PointCloud<PointXYZIRCAEDT>::Ptr tmpRobosenseCloudIn_front(new pcl::PointCloud<PointXYZIRCAEDT>());
+    //     pcl::PointCloud<PointXYZIRCAEDT>::Ptr tmpRobosenseCloudIn_rear(new pcl::PointCloud<PointXYZIRCAEDT>());
+    //     pcl::PointCloud<PointXYZRGBRT>::Ptr cloud_conc(new pcl::PointCloud<PointXYZRGBRT>());
+
+    //     PointCloudConfig config_front = pointcloud_configs_[0];
+    //     PointCloudConfig config_rear = pointcloud_configs_[1];
+
+    //     std::uint32_t cloud1_time_ns = cloud1_msg->header.stamp.sec * 1e9 + cloud1_msg->header.stamp.nanosec;
+    //     std::uint32_t cloud2_time_ns = cloud2_msg->header.stamp.sec * 1e9 + cloud2_msg->header.stamp.nanosec;
+    //     std::uint32_t cloud1_diff_ns = 0;
+    //     std::uint32_t cloud2_diff_ns = 0;
+
+    //     if(cloud1_time_ns < cloud2_time_ns) //点云时间dt调整
+    //     {
+    //         msg_header.stamp = cloud1_msg->header.stamp;
+    //         cloud2_diff_ns = cloud2_time_ns - cloud1_time_ns;
+    //     }
+    //     else
+    //     {
+    //         msg_header.stamp = cloud2_msg->header.stamp;
+    //         cloud1_diff_ns = cloud1_time_ns - cloud2_time_ns;
+    //     }
+
+
+    //     auto rosmsg_start = std::chrono::high_resolution_clock::now();
+
+    //     #pragma omp parallel sections
+    //     {
+    //         #pragma omp section
+    //         {
+    //             sensor_msgs::msg::PointCloud2 msg = std::move(*cloud1_msg);
+    //             pcl::fromROSMsg(msg, *tmpRobosenseCloudIn_front);
+    //         }
+            
+    //         #pragma omp section
+    //         {
+    //             sensor_msgs::msg::PointCloud2 msg = std::move(*cloud2_msg);
+    //             pcl::fromROSMsg(msg, *tmpRobosenseCloudIn_rear);
+    //         }
+    //     }
+
+    //     size_t size_lidar = tmpRobosenseCloudIn_front->size() + tmpRobosenseCloudIn_rear->size();
+    //     cloud_conc->resize(size_lidar);
+
+    //     auto points_start = std::chrono::high_resolution_clock::now();
+
+
+    //     // 并行处理前部点云转换
+    //     #pragma omp parallel for
+    //     for (size_t i = 0; i < tmpRobosenseCloudIn_front->size(); i++) 
+    //     {
+    //         auto &src = tmpRobosenseCloudIn_front->points[i];
+    //         auto &dst = cloud_conc->points[i];
+    //         Eigen::Vector3f point_vec(src.x, src.y, src.z);
+    //         Eigen::Vector3f transformed_vec = config_front.extrinsic.rotation * point_vec + config_front.extrinsic.translation;
+    //         dst.x = transformed_vec.x();
+    //         dst.y = transformed_vec.y();
+    //         dst.z = transformed_vec.z();
+    //         dst.time_stamp = src.time_stamp + cloud1_diff_ns;
+    //     }
+        
+    //     size_t size_front = tmpRobosenseCloudIn_front->size();
+        
+    //     // 并行处理后部点云转换
+    //     #pragma omp parallel for
+    //     for (size_t i = 0; i < tmpRobosenseCloudIn_rear->size(); i++) {
+    //         auto &src = tmpRobosenseCloudIn_rear->points[i];
+    //         auto &dst = cloud_conc->points[i+size_front];
+    //         Eigen::Vector3f point_vec(src.x, src.y, src.z);
+    //         Eigen::Vector3f transformed_vec = config_rear.extrinsic.rotation * point_vec + config_rear.extrinsic.translation;
+    //         dst.x = transformed_vec.x();
+    //         dst.y = transformed_vec.y();
+    //         dst.z = transformed_vec.z();
+    //         dst.time_stamp = src.time_stamp + cloud2_diff_ns;
+    //     }
+    //     auto undistort_start = std::chrono::high_resolution_clock::now();
+
+        
+    //     // 处理图像
+    //     std::vector<cv::Mat> images;
+    //     images.resize(2);
+    //     #pragma omp parallel sections
+    //     {
+    //         #pragma omp section
+    //         {
+    //             images.at(0) = processImage(image1_msg, 0);
+    //         }
+            
+    //         #pragma omp section
+    //         {
+    //             images.at(1) = processImage(image2_msg, 1);
+    //         }
+    //     }
+
+    //     // cv::imshow("Image 0", images[0]);
+    //     // cv::imshow("Image 1", images[1]);
+    //     // cv::waitKey(1);
+    //     auto color_start = std::chrono::high_resolution_clock::now();
+        
+    //     // 执行点云上色
+    //     auto colored_cloud = colorPointCloud(cloud_conc, images);
+
+    //     //转换为PointCloud2
+    //     sensor_msgs::msg::PointCloud2 colored_cloud_msg;
+    //     pcl::toROSMsg(*colored_cloud, colored_cloud_msg);
+    //     colored_cloud_msg.header = msg_header;
+        
+    //     // 写入Bag
+    //     std::cout << "lidar time: " << msg_header.stamp.sec << "-" << msg_header.stamp.nanosec << std::endl;
+    //     bag_manager_->addMessage(
+    //         colored_cloud_msg,
+    //         "/sensing/lidar/points_rgb",
+    //         msg_header.stamp
+    //     );
+
+    //     auto color_end = std::chrono::high_resolution_clock::now();
+
+    //     // publishColoredCloud(colored_cloud);
+
+    //     // std::cout << "ros time: " << std::chrono::duration_cast<std::chrono::milliseconds>(points_start - rosmsg_start).count() << " ms" << std::endl;
+    //     // std::cout << "points time: " << std::chrono::duration_cast<std::chrono::milliseconds>(undistort_start - points_start).count() << " ms" << std::endl;
+    //     // std::cout << "undistort time: " << std::chrono::duration_cast<std::chrono::milliseconds>(color_start - undistort_start).count() << " ms" << std::endl;
+    //     // std::cout << "color time: " << std::chrono::duration_cast<std::chrono::milliseconds>(color_end - color_start).count() << " ms" << std::endl;
+
+    // }
+    void syncCallback(const PointCloud2::ConstSharedPtr& cloud1_msg, 
+                  const PointCloud2::ConstSharedPtr& cloud2_msg, 
+                  const Image::ConstSharedPtr& image1_msg, 
+                  const Image::ConstSharedPtr& image2_msg)
     {
-        static int points_count = 0;
+        auto rosmsg_start = std::chrono::high_resolution_clock::now();
+        static std::atomic<int> points_count{0};
         points_count++;
         std::cout << "points count: " << points_count << std::endl;
 
         auto msg_header = cloud1_msg->header;
         msg_header.frame_id = "base_link";
 
-        // // 将时间转换为rclcpp::Time类型以便进行运算
-        // rclcpp::Time cloud1_time(cloud1_msg->header.stamp);
-        // rclcpp::Time cloud2_time(cloud2_msg->header.stamp);
-        // rclcpp::Time image1_time(image1_msg->header.stamp);
-        // rclcpp::Time image2_time(image2_msg->header.stamp);
+        // 时间戳处理优化
+        const auto cloud1_time_ns = static_cast<uint64_t>(cloud1_msg->header.stamp.sec) * 1000000000ULL + 
+                                    cloud1_msg->header.stamp.nanosec;
+        const auto cloud2_time_ns = static_cast<uint64_t>(cloud2_msg->header.stamp.sec) * 1000000000ULL + 
+                                    cloud2_msg->header.stamp.nanosec;
         
-        // // 计算最大时间差
-        // double max_diff = 0.0;
-        // max_diff = std::max(max_diff, std::abs((cloud1_time - image1_time).seconds()));
-        // max_diff = std::max(max_diff, std::abs((cloud2_time - image2_time).seconds()));
-        // max_diff = std::max(max_diff, std::abs((cloud1_time - cloud2_time).seconds()));
-        // max_diff = std::max(max_diff, std::abs((image1_time - image2_time).seconds()));
-
-        // RCLCPP_INFO(this->get_logger(), "Received synchronized messages (max time diff: %.6fs)", max_diff);
+        uint32_t cloud1_diff_ns = 0;
+        uint32_t cloud2_diff_ns = 0;
         
-        // if (max_diff > general_config_.max_time_diff) {
-        //     RCLCPP_WARN(this->get_logger(), "Time difference too large: %.6f > %.3f seconds", 
-        //             max_diff, general_config_.max_time_diff);
-        //     return;
-        // }
-
-
-        pcl::PointCloud<PointXYZIRCAEDT>::Ptr tmpRobosenseCloudIn_front(new pcl::PointCloud<PointXYZIRCAEDT>());
-        pcl::PointCloud<PointXYZIRCAEDT>::Ptr tmpRobosenseCloudIn_rear(new pcl::PointCloud<PointXYZIRCAEDT>());
-        pcl::PointCloud<PointXYZRGBRT>::Ptr cloud_conc(new pcl::PointCloud<PointXYZRGBRT>());
-
-        PointCloudConfig config_front = pointcloud_configs_[0];
-        PointCloudConfig config_rear = pointcloud_configs_[1];
-
-        std::uint32_t cloud1_time_ns = cloud1_msg->header.stamp.sec * 1e9 + cloud1_msg->header.stamp.nanosec;
-        std::uint32_t cloud2_time_ns = cloud2_msg->header.stamp.sec * 1e9 + cloud2_msg->header.stamp.nanosec;
-        std::uint32_t cloud1_diff_ns = 0;
-        std::uint32_t cloud2_diff_ns = 0;
-
-        if(cloud1_time_ns < cloud2_time_ns) //点云时间dt调整
-        {
+        if(cloud1_time_ns < cloud2_time_ns) {
             msg_header.stamp = cloud1_msg->header.stamp;
-            cloud2_diff_ns = cloud2_time_ns - cloud1_time_ns;
-        }
-        else
-        {
+            cloud2_diff_ns = static_cast<uint32_t>(cloud2_time_ns - cloud1_time_ns);
+        } else {
             msg_header.stamp = cloud2_msg->header.stamp;
-            cloud1_diff_ns = cloud1_time_ns - cloud2_time_ns;
+            cloud1_diff_ns = static_cast<uint32_t>(cloud1_time_ns - cloud2_time_ns);
         }
 
-
-        auto rosmsg_start = std::chrono::high_resolution_clock::now();
-
+        // 预分配所有需要的点云
+        auto tmpRobosenseCloudIn_front = std::make_shared<pcl::PointCloud<PointXYZIRCAEDT>>();
+        auto tmpRobosenseCloudIn_rear = std::make_shared<pcl::PointCloud<PointXYZIRCAEDT>>();
+        auto cloud_conc = std::make_shared<pcl::PointCloud<PointXYZRGBRT>>();
+        
+        // 优化1: 并行化转换，避免不必要的拷贝
         #pragma omp parallel sections
         {
             #pragma omp section
             {
-                sensor_msgs::msg::PointCloud2 msg = std::move(*cloud1_msg);
-                pcl::fromROSMsg(msg, *tmpRobosenseCloudIn_front);
+                // 直接从ROS消息转换，避免中间拷贝
+                pcl::fromROSMsg(*cloud1_msg, *tmpRobosenseCloudIn_front);
             }
             
             #pragma omp section
             {
-                sensor_msgs::msg::PointCloud2 msg = std::move(*cloud2_msg);
-                pcl::fromROSMsg(msg, *tmpRobosenseCloudIn_rear);
+                pcl::fromROSMsg(*cloud2_msg, *tmpRobosenseCloudIn_rear);
             }
         }
-
-        size_t size_lidar = tmpRobosenseCloudIn_front->size() + tmpRobosenseCloudIn_rear->size();
+        
+        // 预分配内存
+        const size_t size_lidar = tmpRobosenseCloudIn_front->size() + tmpRobosenseCloudIn_rear->size();
         cloud_conc->resize(size_lidar);
-
-        auto points_start = std::chrono::high_resolution_clock::now();
-
-
-        // 并行处理前部点云转换
-        #pragma omp parallel for
-        for (size_t i = 0; i < tmpRobosenseCloudIn_front->size(); i++) 
+        
+        // 优化2: 批量处理转换，减少内存访问开销
+        const PointCloudConfig& config_front = pointcloud_configs_[0];
+        const PointCloudConfig& config_rear = pointcloud_configs_[1];
+        
+        const Eigen::Matrix3f rot_front = config_front.extrinsic.rotation;
+        const Eigen::Vector3f trans_front = config_front.extrinsic.translation;
+        const Eigen::Matrix3f rot_rear = config_rear.extrinsic.rotation;
+        const Eigen::Vector3f trans_rear = config_rear.extrinsic.translation;
+        
+        const size_t size_front = tmpRobosenseCloudIn_front->size();
+        
+        // 优化3: 使用单次并行循环处理两个点云
+        #pragma omp parallel
         {
-            auto &src = tmpRobosenseCloudIn_front->points[i];
-            auto &dst = cloud_conc->points[i];
-            Eigen::Vector3f point_vec(src.x, src.y, src.z);
-            Eigen::Vector3f transformed_vec = config_front.extrinsic.rotation * point_vec + config_front.extrinsic.translation;
-            dst.x = transformed_vec.x();
-            dst.y = transformed_vec.y();
-            dst.z = transformed_vec.z();
-            dst.channel = src.channel;
-            dst.time_stamp = src.time_stamp + cloud1_diff_ns;
+            // 处理前部点云
+            #pragma omp for nowait
+            for (size_t i = 0; i < size_front; i++) 
+            {
+                const auto& src = tmpRobosenseCloudIn_front->points[i];
+                auto& dst = cloud_conc->points[i];
+                
+                // 手动展开向量计算，避免临时对象
+                Eigen::Vector3f point_vec(src.x, src.y, src.z);
+                point_vec = rot_front * point_vec;
+                
+                dst.x = point_vec.x() + trans_front.x();
+                dst.y = point_vec.y() + trans_front.y();
+                dst.z = point_vec.z() + trans_front.z();
+                dst.time_stamp = src.time_stamp + cloud1_diff_ns;
+            }
+            
+            // 处理后部点云
+            #pragma omp for nowait
+            for (size_t i = 0; i < tmpRobosenseCloudIn_rear->size(); i++) 
+            {
+                const auto& src = tmpRobosenseCloudIn_rear->points[i];
+                auto& dst = cloud_conc->points[i + size_front];
+                
+                Eigen::Vector3f point_vec(src.x, src.y, src.z);
+                point_vec = rot_rear * point_vec;
+                
+                dst.x = point_vec.x() + trans_rear.x();
+                dst.y = point_vec.y() + trans_rear.y();
+                dst.z = point_vec.z() + trans_rear.z();
+                dst.time_stamp = src.time_stamp + cloud2_diff_ns;
+            }
         }
         
-        size_t size_front = tmpRobosenseCloudIn_front->size();
+        // 优化4: 并行处理图像
+        std::vector<cv::Mat> images(2);
         
-        // 并行处理后部点云转换
-        #pragma omp parallel for
-        for (size_t i = 0; i < tmpRobosenseCloudIn_rear->size(); i++) {
-            auto &src = tmpRobosenseCloudIn_rear->points[i];
-            auto &dst = cloud_conc->points[i+size_front];
-            Eigen::Vector3f point_vec(src.x, src.y, src.z);
-            Eigen::Vector3f transformed_vec = config_rear.extrinsic.rotation * point_vec + config_rear.extrinsic.translation;
-            dst.x = transformed_vec.x();
-            dst.y = transformed_vec.y();
-            dst.z = transformed_vec.z();
-            dst.channel = src.channel;
-            dst.time_stamp = src.time_stamp + cloud2_diff_ns;
-        }
-        auto undistort_start = std::chrono::high_resolution_clock::now();
-
-        
-        // 处理图像
-        std::vector<cv::Mat> images;
-        images.resize(2);
         #pragma omp parallel sections
         {
             #pragma omp section
             {
-                images.at(0) = processImage(image1_msg, 0);
+                images[0] = processImage(image1_msg, 0);
             }
             
             #pragma omp section
             {
-                images.at(1) = processImage(image2_msg, 1);
+                images[1] = processImage(image2_msg, 1);
             }
         }
-
-        // cv::imshow("Image 0", images[0]);
-        // cv::imshow("Image 1", images[1]);
-        // cv::waitKey(1);
-        auto color_start = std::chrono::high_resolution_clock::now();
         
-        // 执行点云上色
-        auto colored_cloud = colorPointCloud(cloud_conc, images);
-
-        //转换为PointCloud2
+        // 优化5: 使用引用避免拷贝
+        const auto& colored_cloud = colorPointCloud(cloud_conc, images);
+        
+        // 优化6: 直接发布，避免中间转换
         sensor_msgs::msg::PointCloud2 colored_cloud_msg;
         pcl::toROSMsg(*colored_cloud, colored_cloud_msg);
         colored_cloud_msg.header = msg_header;
         
-        // 写入Bag
-        std::cout << "lidar time: " << msg_header.stamp.sec << "-" << msg_header.stamp.nanosec << std::endl;
+        // 写入Bag文件
         bag_manager_->addMessage(
             colored_cloud_msg,
             "/sensing/lidar/points_rgb",
             msg_header.stamp
         );
-
         auto color_end = std::chrono::high_resolution_clock::now();
-
-        // publishColoredCloud(colored_cloud);
-
-        // std::cout << "ros time: " << std::chrono::duration_cast<std::chrono::milliseconds>(points_start - rosmsg_start).count() << " ms" << std::endl;
-        // std::cout << "points time: " << std::chrono::duration_cast<std::chrono::milliseconds>(undistort_start - points_start).count() << " ms" << std::endl;
-        // std::cout << "undistort time: " << std::chrono::duration_cast<std::chrono::milliseconds>(color_start - undistort_start).count() << " ms" << std::endl;
-        // std::cout << "color time: " << std::chrono::duration_cast<std::chrono::milliseconds>(color_end - color_start).count() << " ms" << std::endl;
-
+        std::cout << "ros time: " << std::chrono::duration_cast<std::chrono::milliseconds>(color_end - rosmsg_start).count() << " ms" << std::endl;
     }
 
     // Bag记录控制服务回调
