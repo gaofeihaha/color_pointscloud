@@ -1,11 +1,12 @@
 # 通用参数
 general:
   image_queue_size: 100
-  max_time_diff: 0.1  # 同步数据允许的最大时间差（秒）
+  max_time_diff: 0.06  # 同步数据允许的最大时间差（秒）
   use_tf: false
   output_topic: "/colored_pointcloud"  # 合并后的输出话题
 
-# 点云话题配置
+# 73th
+# tf2 lidar -> base_link 点云话题配置
 pointcloud_topics:
   - topic: "/sensing/lidar/front_top/points"
     frame_id: "lidar_ft_base_link"
@@ -19,7 +20,7 @@ pointcloud_topics:
       rotation: [-0.9995469558515246, 0.01631743070468051, -0.025290798784311837, -0.01598760453526775, -0.9997851982849102, -0.013189154318102917, -0.02550057938899596, -0.012778839759571153, 0.9995931280802328]
       translation: [0.603, 0.0, 1.9]
 
-# 图像话题配置
+# tf2 base_link -> camera 图像话题配置
 image_topics:
   - topic: "/electronic_rearview_mirror/rear/camera_image_jpeg"
     name: "front_camera"
@@ -30,8 +31,8 @@ image_topics:
       cy: 537.393016372
       k: [4.3688527209, 1.7598298445, -7.2174e-06, -4.16115e-05, 0.0624271479, 4.7719917613, 3.3758402528, 0.4121558531]
     extrinsic_params:
-      rotation: [0.006684898271486994, -0.9999655492541022, -0.004920613787092298, 0.018525953011408525, 0.005043724582459386, -0.9998156579626845, 0.999806031788226, 0.006592506903913498, 0.01855903156425187]
-      translation: [-0.092, 0.552, -3.345]
+      rotation: [0.013750320293374863, -0.9997460692915707, -0.017852888502534747, 0.01202658809079793, 0.01801864366354544, -0.9997653172917237, 0.9998331310127327, 0.013532383994718011, 0.012271296292389655]
+      translation: [-0.079, 0.712, -3.350]
       
   - topic: "/electronic_rearview_mirror/rear_3mm/camera_image_jpeg"
     name: "rear_camera"
