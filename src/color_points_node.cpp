@@ -56,7 +56,7 @@ POINT_CLOUD_REGISTER_POINT_STRUCT(PointXYZIRCAEDT,
       (std::uint32_t, time_stamp, time_stamp)
 )
 
-struct PointXYZRGBRT
+struct PointXYZRGBT
 {
   PCL_ADD_POINT4D;                     // x,y,z + padding
   union
@@ -67,7 +67,7 @@ struct PointXYZRGBRT
   std::uint32_t time_stamp{0U};
   
 }EIGEN_ALIGN16;
-POINT_CLOUD_REGISTER_POINT_STRUCT(PointXYZRGBRT, 
+POINT_CLOUD_REGISTER_POINT_STRUCT(PointXYZRGBT, 
       (float, x, x)(float, y, y)(float, z, z)(uint32_t, rgba, rgba)
       (std::uint32_t, time_stamp, time_stamp)
 )
@@ -153,6 +153,9 @@ public:
 
 private:
     BagManager *bag_manager_;
+    size_t gnss_count = 0;
+    size_t imu_count = 0;
+    size_t points_count = 0;
 
 private:
     std::vector<std::pair<cv::Mat, cv::Mat>> undistort_maps_;
@@ -313,7 +316,7 @@ private:
     {
         
         // 创建QoS配置
-        auto qos = rclcpp::QoS(rclcpp::QoSInitialization(RMW_QOS_POLICY_HISTORY_KEEP_LAST, 100));
+        auto qos = rclcpp::QoS(rclcpp::QoSInitialization(RMW_QOS_POLICY_HISTORY_KEEP_LAST, 1000));
         qos.reliability(RMW_QOS_POLICY_RELIABILITY_RELIABLE);
         
         // 初始化点云订阅者
@@ -334,27 +337,20 @@ private:
             RCLCPP_INFO(this->get_logger(), "Subscribed to image: %s", config.topic.c_str());
         }
 
-        static int gnss_count = 0;
-        static int imu_count = 0;
-
-
-
         gnss_sub_ = create_subscription<sensor_msgs::msg::NavSatFix>(
-            "/sensing/gnss/fix", 100,
+            "/sensing/gnss/fix", 10000,
             [this](const sensor_msgs::msg::NavSatFix::SharedPtr msg)
             {
                 gnss_count++;
-                std::cout << "gnss count: " << gnss_count << std::endl;
             // std::cout << "gnss time: " << msg->header.stamp.sec << "-" << msg->header.stamp.nanosec << std::endl;
                 bag_manager_->addMessage(*msg, "/sensing/gnss/fix", msg->header.stamp);
             });
 
         imu_sub_ = create_subscription<sensor_msgs::msg::Imu>(
-            "/sensing/imu/imu_data", 100,
+            "/sensing/imu/imu_data", 10000,
             [this](const sensor_msgs::msg::Imu::SharedPtr msg)
             {
             // std::cout << "imu time: " << msg->header.stamp.sec << "-" << msg->header.stamp.nanosec << std::endl;
-            std::cout << "imu count: " << imu_count << std::endl;
                 imu_count++;
                 bag_manager_->addMessage(*msg, "/sensing/imu/imu_data", msg->header.stamp);
             });
@@ -391,171 +387,14 @@ private:
                    general_config_.image_queue_size);
     }
     
-    // void syncCallback(const PointCloud2::ConstSharedPtr& cloud1_msg, const PointCloud2::ConstSharedPtr& cloud2_msg, const Image::ConstSharedPtr& image1_msg, const Image::ConstSharedPtr& image2_msg)
-    // {
-    //     static int points_count = 0;
-    //     points_count++;
-    //     std::cout << "points count: " << points_count << std::endl;
-
-    //     auto msg_header = cloud1_msg->header;
-    //     msg_header.frame_id = "base_link";
-
-    //     // // 将时间转换为rclcpp::Time类型以便进行运算
-    //     // rclcpp::Time cloud1_time(cloud1_msg->header.stamp);
-    //     // rclcpp::Time cloud2_time(cloud2_msg->header.stamp);
-    //     // rclcpp::Time image1_time(image1_msg->header.stamp);
-    //     // rclcpp::Time image2_time(image2_msg->header.stamp);
-        
-    //     // // 计算最大时间差
-    //     // double max_diff = 0.0;
-    //     // max_diff = std::max(max_diff, std::abs((cloud1_time - image1_time).seconds()));
-    //     // max_diff = std::max(max_diff, std::abs((cloud2_time - image2_time).seconds()));
-    //     // max_diff = std::max(max_diff, std::abs((cloud1_time - cloud2_time).seconds()));
-    //     // max_diff = std::max(max_diff, std::abs((image1_time - image2_time).seconds()));
-
-    //     // RCLCPP_INFO(this->get_logger(), "Received synchronized messages (max time diff: %.6fs)", max_diff);
-        
-    //     // if (max_diff > general_config_.max_time_diff) {
-    //     //     RCLCPP_WARN(this->get_logger(), "Time difference too large: %.6f > %.3f seconds", 
-    //     //             max_diff, general_config_.max_time_diff);
-    //     //     return;
-    //     // }
-
-
-    //     pcl::PointCloud<PointXYZIRCAEDT>::Ptr tmpRobosenseCloudIn_front(new pcl::PointCloud<PointXYZIRCAEDT>());
-    //     pcl::PointCloud<PointXYZIRCAEDT>::Ptr tmpRobosenseCloudIn_rear(new pcl::PointCloud<PointXYZIRCAEDT>());
-    //     pcl::PointCloud<PointXYZRGBRT>::Ptr cloud_conc(new pcl::PointCloud<PointXYZRGBRT>());
-
-    //     PointCloudConfig config_front = pointcloud_configs_[0];
-    //     PointCloudConfig config_rear = pointcloud_configs_[1];
-
-    //     std::uint32_t cloud1_time_ns = cloud1_msg->header.stamp.sec * 1e9 + cloud1_msg->header.stamp.nanosec;
-    //     std::uint32_t cloud2_time_ns = cloud2_msg->header.stamp.sec * 1e9 + cloud2_msg->header.stamp.nanosec;
-    //     std::uint32_t cloud1_diff_ns = 0;
-    //     std::uint32_t cloud2_diff_ns = 0;
-
-    //     if(cloud1_time_ns < cloud2_time_ns) //点云时间dt调整
-    //     {
-    //         msg_header.stamp = cloud1_msg->header.stamp;
-    //         cloud2_diff_ns = cloud2_time_ns - cloud1_time_ns;
-    //     }
-    //     else
-    //     {
-    //         msg_header.stamp = cloud2_msg->header.stamp;
-    //         cloud1_diff_ns = cloud1_time_ns - cloud2_time_ns;
-    //     }
-
-
-    //     auto rosmsg_start = std::chrono::high_resolution_clock::now();
-
-    //     #pragma omp parallel sections
-    //     {
-    //         #pragma omp section
-    //         {
-    //             sensor_msgs::msg::PointCloud2 msg = std::move(*cloud1_msg);
-    //             pcl::fromROSMsg(msg, *tmpRobosenseCloudIn_front);
-    //         }
-            
-    //         #pragma omp section
-    //         {
-    //             sensor_msgs::msg::PointCloud2 msg = std::move(*cloud2_msg);
-    //             pcl::fromROSMsg(msg, *tmpRobosenseCloudIn_rear);
-    //         }
-    //     }
-
-    //     size_t size_lidar = tmpRobosenseCloudIn_front->size() + tmpRobosenseCloudIn_rear->size();
-    //     cloud_conc->resize(size_lidar);
-
-    //     auto points_start = std::chrono::high_resolution_clock::now();
-
-
-    //     // 并行处理前部点云转换
-    //     #pragma omp parallel for
-    //     for (size_t i = 0; i < tmpRobosenseCloudIn_front->size(); i++) 
-    //     {
-    //         auto &src = tmpRobosenseCloudIn_front->points[i];
-    //         auto &dst = cloud_conc->points[i];
-    //         Eigen::Vector3f point_vec(src.x, src.y, src.z);
-    //         Eigen::Vector3f transformed_vec = config_front.extrinsic.rotation * point_vec + config_front.extrinsic.translation;
-    //         dst.x = transformed_vec.x();
-    //         dst.y = transformed_vec.y();
-    //         dst.z = transformed_vec.z();
-    //         dst.time_stamp = src.time_stamp + cloud1_diff_ns;
-    //     }
-        
-    //     size_t size_front = tmpRobosenseCloudIn_front->size();
-        
-    //     // 并行处理后部点云转换
-    //     #pragma omp parallel for
-    //     for (size_t i = 0; i < tmpRobosenseCloudIn_rear->size(); i++) {
-    //         auto &src = tmpRobosenseCloudIn_rear->points[i];
-    //         auto &dst = cloud_conc->points[i+size_front];
-    //         Eigen::Vector3f point_vec(src.x, src.y, src.z);
-    //         Eigen::Vector3f transformed_vec = config_rear.extrinsic.rotation * point_vec + config_rear.extrinsic.translation;
-    //         dst.x = transformed_vec.x();
-    //         dst.y = transformed_vec.y();
-    //         dst.z = transformed_vec.z();
-    //         dst.time_stamp = src.time_stamp + cloud2_diff_ns;
-    //     }
-    //     auto undistort_start = std::chrono::high_resolution_clock::now();
-
-        
-    //     // 处理图像
-    //     std::vector<cv::Mat> images;
-    //     images.resize(2);
-    //     #pragma omp parallel sections
-    //     {
-    //         #pragma omp section
-    //         {
-    //             images.at(0) = processImage(image1_msg, 0);
-    //         }
-            
-    //         #pragma omp section
-    //         {
-    //             images.at(1) = processImage(image2_msg, 1);
-    //         }
-    //     }
-
-    //     // cv::imshow("Image 0", images[0]);
-    //     // cv::imshow("Image 1", images[1]);
-    //     // cv::waitKey(1);
-    //     auto color_start = std::chrono::high_resolution_clock::now();
-        
-    //     // 执行点云上色
-    //     auto colored_cloud = colorPointCloud(cloud_conc, images);
-
-    //     //转换为PointCloud2
-    //     sensor_msgs::msg::PointCloud2 colored_cloud_msg;
-    //     pcl::toROSMsg(*colored_cloud, colored_cloud_msg);
-    //     colored_cloud_msg.header = msg_header;
-        
-    //     // 写入Bag
-    //     std::cout << "lidar time: " << msg_header.stamp.sec << "-" << msg_header.stamp.nanosec << std::endl;
-    //     bag_manager_->addMessage(
-    //         colored_cloud_msg,
-    //         "/sensing/lidar/points_rgb",
-    //         msg_header.stamp
-    //     );
-
-    //     auto color_end = std::chrono::high_resolution_clock::now();
-
-    //     // publishColoredCloud(colored_cloud);
-
-    //     // std::cout << "ros time: " << std::chrono::duration_cast<std::chrono::milliseconds>(points_start - rosmsg_start).count() << " ms" << std::endl;
-    //     // std::cout << "points time: " << std::chrono::duration_cast<std::chrono::milliseconds>(undistort_start - points_start).count() << " ms" << std::endl;
-    //     // std::cout << "undistort time: " << std::chrono::duration_cast<std::chrono::milliseconds>(color_start - undistort_start).count() << " ms" << std::endl;
-    //     // std::cout << "color time: " << std::chrono::duration_cast<std::chrono::milliseconds>(color_end - color_start).count() << " ms" << std::endl;
-
-    // }
     void syncCallback(const PointCloud2::ConstSharedPtr& cloud1_msg, 
                   const PointCloud2::ConstSharedPtr& cloud2_msg, 
                   const Image::ConstSharedPtr& image1_msg, 
                   const Image::ConstSharedPtr& image2_msg)
     {
         auto rosmsg_start = std::chrono::high_resolution_clock::now();
-        static std::atomic<int> points_count{0};
+        
         points_count++;
-        std::cout << "points count: " << points_count << std::endl;
 
         auto msg_header = cloud1_msg->header;
         msg_header.frame_id = "base_link";
@@ -577,10 +416,12 @@ private:
             cloud1_diff_ns = static_cast<uint32_t>(cloud1_time_ns - cloud2_time_ns);
         }
 
+        std::cout << "cloud_diff_ns: " << cloud1_diff_ns << " " << cloud2_diff_ns << std::endl;
+
         // 预分配所有需要的点云
         auto tmpRobosenseCloudIn_front = std::make_shared<pcl::PointCloud<PointXYZIRCAEDT>>();
         auto tmpRobosenseCloudIn_rear = std::make_shared<pcl::PointCloud<PointXYZIRCAEDT>>();
-        auto cloud_conc = std::make_shared<pcl::PointCloud<PointXYZRGBRT>>();
+        auto cloud_conc = std::make_shared<pcl::PointCloud<PointXYZRGBT>>();
         
         // 优化1: 并行化转换，避免不必要的拷贝
         #pragma omp parallel sections
@@ -629,6 +470,7 @@ private:
                 dst.x = point_vec.x() + trans_front.x();
                 dst.y = point_vec.y() + trans_front.y();
                 dst.z = point_vec.z() + trans_front.z();
+                // dst.time_stamp = src.time_stamp;
                 dst.time_stamp = src.time_stamp + cloud1_diff_ns;
             }
             
@@ -645,6 +487,7 @@ private:
                 dst.x = point_vec.x() + trans_rear.x();
                 dst.y = point_vec.y() + trans_rear.y();
                 dst.z = point_vec.z() + trans_rear.z();
+                // dst.time_stamp = src.time_stamp;
                 dst.time_stamp = src.time_stamp + cloud2_diff_ns;
             }
         }
@@ -680,7 +523,8 @@ private:
             msg_header.stamp
         );
         auto color_end = std::chrono::high_resolution_clock::now();
-        std::cout << "ros time: " << std::chrono::duration_cast<std::chrono::milliseconds>(color_end - rosmsg_start).count() << " ms" << std::endl;
+        std::cout << "ros time: " << std::chrono::duration_cast<std::chrono::milliseconds>(color_end - rosmsg_start).count() << " ms" << 
+        " points count: " << points_count <<" imu count: " << imu_count << " gnss count: " << gnss_count << std::endl;
     }
 
     // Bag记录控制服务回调
@@ -807,11 +651,11 @@ private:
         return image;
     }
     
-    pcl::PointCloud<PointXYZRGBRT>::Ptr colorPointCloud(
-    const pcl::PointCloud<PointXYZRGBRT>::Ptr& cloud,
+    pcl::PointCloud<PointXYZRGBT>::Ptr colorPointCloud(
+    const pcl::PointCloud<PointXYZRGBT>::Ptr& cloud,
     const std::vector<cv::Mat>& images)
     {
-        auto colored_cloud = pcl::PointCloud<PointXYZRGBRT>::Ptr(new pcl::PointCloud<PointXYZRGBRT>());
+        auto colored_cloud = pcl::PointCloud<PointXYZRGBT>::Ptr(new pcl::PointCloud<PointXYZRGBT>());
         
         // 预分配内存以提高性能
         colored_cloud->reserve(cloud->size());
@@ -839,7 +683,7 @@ private:
         #pragma omp parallel
         {
             // 每个线程有自己的局部点云，避免锁竞争
-            pcl::PointCloud<PointXYZRGBRT>::Ptr local_cloud(new pcl::PointCloud<PointXYZRGBRT>());
+            pcl::PointCloud<PointXYZRGBT>::Ptr local_cloud(new pcl::PointCloud<PointXYZRGBT>());
             local_cloud->reserve(cloud->size() / omp_get_num_threads() + 1);
             
             #pragma omp for nowait schedule(dynamic, 100)  // 动态调度，块大小为100
@@ -891,7 +735,7 @@ private:
                                 cv::Vec3b color = images[j].at<cv::Vec3b>(v, u);
                                 
                                 // 创建彩色点
-                                PointXYZRGBRT colored_point = point;
+                                PointXYZRGBT colored_point = point;
                                 colored_point.rgba_struct.r = color[2];
                                 colored_point.rgba_struct.g = color[1];
                                 colored_point.rgba_struct.b = color[0];
@@ -905,7 +749,7 @@ private:
                 
                 // 如果点没有被任何相机看到，添加默认颜色（灰色）
                 if (!point_colored) {
-                    PointXYZRGBRT uncolored_point = point;
+                    PointXYZRGBT uncolored_point = point;
                     uncolored_point.rgba_struct.r = 128;
                     uncolored_point.rgba_struct.g = 128;
                     uncolored_point.rgba_struct.b = 128;
@@ -921,13 +765,13 @@ private:
             }
         }
         
-        RCLCPP_INFO(this->get_logger(), "Colored point cloud created with %ld points (from %ld input points)", 
-                colored_cloud->size(), cloud->size());
+        // RCLCPP_INFO(this->get_logger(), "Colored point cloud created with %ld points (from %ld input points)", 
+        //         colored_cloud->size(), cloud->size());
         return colored_cloud;
     }
 
     
-    void publishColoredCloud(const pcl::PointCloud<PointXYZRGBRT>::Ptr& cloud)
+    void publishColoredCloud(const pcl::PointCloud<PointXYZRGBT>::Ptr& cloud)
     {
         PointCloud2 cloud_msg;
         pcl::toROSMsg(*cloud, cloud_msg);
