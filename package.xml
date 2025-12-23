@@ -2,30 +2,41 @@
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
   <name>color_pointscloud</name>
-  <version>0.0.0</version>
-  <description>TODO: Package description</description>
+  <version>0.1.0</version>
+  <description>ROS2 component for coloring point clouds with images</description>
   <maintainer email="pix@todo.todo">pix</maintainer>
-  <license>TODO: License</license>
+  <license>Apache-2.0</license>
 
   <buildtool_depend>ament_cmake</buildtool_depend>
 
   <depend>rclcpp</depend>
-  <!-- <depend>rclcpp_components</depend> -->
+  <depend>rclcpp_components</depend>
   <depend>sensor_msgs</depend>
+  <depend>std_msgs</depend>
   <depend>pcl_msgs</depend>
+  <depend>std_srvs</depend>
   <depend>pcl_conversions</depend>
   <depend>cv_bridge</depend>
   <depend>image_transport</depend>
   <depend>tf2</depend>
   <depend>tf2_ros</depend>
   <depend>tf2_eigen</depend>
-  <depend>eigen</depend>
-  <depend>yaml-cpp</depend>
-  <depend>std_srvs</depend>
+  <depend>tf2_geometry_msgs</depend>
   <depend>message_filters</depend>
   <depend>rosbag2_cpp</depend>
+  <depend>launch</depend>
+  <depend>launch_ros</depend>
 
-  <build_depend>libomp-dev</build_depend>
+  <!-- System dependencies -->
+  <build_depend>libpcl-dev</build_depend>
+  <build_depend>libopencv-dev</build_depend>
+  <build_depend>libyaml-cpp-dev</build_depend>
+  <build_depend>libeigen3-dev</build_depend>
+
+  <exec_depend>libpcl-dev</exec_depend>
+  <exec_depend>libopencv-dev</exec_depend>
+  <exec_depend>libyaml-cpp-dev</exec_depend>
+  <exec_depend>libeigen3-dev</exec_depend>
 
   <test_depend>ament_lint_auto</test_depend>
   <test_depend>ament_lint_common</test_depend>

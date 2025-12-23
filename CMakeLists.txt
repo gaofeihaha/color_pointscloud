@@ -1,19 +1,20 @@
-cmake_minimum_required(VERSION 3.8)
+cmake_minimum_required(VERSION 3.16)
 project(color_pointscloud)
 
-# ---------- compiler ----------
+# Default to C++17
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+
+# Compiler warnings
 if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   add_compile_options(-Wall -Wextra -Wpedantic)
 endif()
 
-# C++14 (PCL 1.10+ 需要)
-set(CMAKE_CXX_STANDARD 14)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
-
-# ---------- find packages ----------
+# Find ROS 2 packages
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
-# find_package(rclcpp_components REQUIRED)
+find_package(rclcpp_components REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(pcl_msgs REQUIRED)
@@ -28,42 +29,37 @@ find_package(tf2_geometry_msgs REQUIRED)
 find_package(message_filters REQUIRED)
 find_package(rosbag2_cpp REQUIRED)
 
-find_package(PCL REQUIRED COMPONENTS common filters io)
+# Find system packages
+find_package(PCL REQUIRED COMPONENTS common io filters)
 find_package(OpenCV REQUIRED)
 find_package(yaml-cpp REQUIRED)
 find_package(Eigen3 REQUIRED)
 
-find_package(OpenMP REQUIRED)
-set(CMAKE_C_FLAGS   "${CMAKE_C_FLAGS}   ${OpenMP_C_FLAGS}")
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_CXX_FLAGS}")
-
-# ---------- PCL/ROS 宏 ----------
-add_definitions(${PCL_DEFINITIONS})
-# 如果用 pcl_ros 的 transform 相关函数，再打开下面两行
-# find_package(pcl_ros REQUIRED)
-# list(APPEND PCL_ROS_DEPS pcl_ros)
-
-# ---------- build ----------
-# add_library(color_pointscloud_node SHARED
-#   src/color_points_node.cpp
-# )
-add_executable(color_pointscloud_node
-  src/color_points_node.cpp)
-
+# Include directories
 include_directories(
-    include
-    ${rclcpp_INCLUDE_DIRS}
-    ${rosbag2_cpp_INCLUDE_DIRS}
+  include
 )
 
-# ROS 依赖
-ament_target_dependencies(color_pointscloud_node
+# Create library
+add_library(color_pointscloud_component SHARED
+  src/color_points_component.cpp
+)
+
+# Set target properties
+target_include_directories(color_pointscloud_component
+  PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<INSTALL_INTERFACE:include>
+)
+
+# Add ROS dependencies
+ament_target_dependencies(color_pointscloud_component
   rclcpp
-  # rclcpp_components
-  std_srvs
+  rclcpp_components
   sensor_msgs
   std_msgs
   pcl_msgs
+  std_srvs
   pcl_conversions
   cv_bridge
   image_transport
@@ -75,35 +71,52 @@ ament_target_dependencies(color_pointscloud_node
   rosbag2_cpp
 )
 
-
-# 第三方库
-target_link_libraries(color_pointscloud_node
+# Link system libraries
+target_link_libraries(color_pointscloud_component
   ${PCL_LIBRARIES}
   ${OpenCV_LIBS}
-  ${rosbag2_cpp_LIBRARIES}
-  OpenMP::OpenMP_CXX
   yaml-cpp
   Eigen3::Eigen
 )
 
-# 头文件目录
-target_include_directories(color_pointscloud_node PUBLIC
-  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-  $<INSTALL_INTERFACE:include>
-  ${PCL_INCLUDE_DIRS}
+# Register component
+rclcpp_components_register_nodes(color_pointscloud_component
+  "color_pointscloud::ColorPointsComponent"
 )
 
-
-install(TARGETS color_pointscloud_node
-  DESTINATION lib/${PROJECT_NAME})
-
-# 安装配置文件
-install(DIRECTORY
-  config
-  launch
-  DESTINATION share/${PROJECT_NAME}
+# Install library
+install(TARGETS color_pointscloud_component
+  EXPORT export_${PROJECT_NAME}
+  LIBRARY DESTINATION lib
+  RUNTIME DESTINATION bin
+  ARCHIVE DESTINATION lib
 )
 
+# Install headers
+install(DIRECTORY include/
+  DESTINATION include
+)
+
+# Install launch files
+install(DIRECTORY launch/
+  DESTINATION share/${PROJECT_NAME}/
+)
+
+# Install config files
+install(DIRECTORY config/
+  DESTINATION share/${PROJECT_NAME}/
+)
+
+# Export dependencies
+ament_export_dependencies(
+  rclcpp
+  rclcpp_components
+)
+
+ament_export_libraries(color_pointscloud_component)
+ament_export_include_directories(include)
+
+# Tests
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
   ament_lint_auto_find_test_dependencies()
