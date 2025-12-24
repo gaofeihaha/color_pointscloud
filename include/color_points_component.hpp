@@ -19,6 +19,7 @@
 #include <pcl_conversions/pcl_conversions.h>
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
+#include <pcl/common/common.h>
 #include <pcl/common/transforms.h>
 #include <message_filters/subscriber.h>
 #include <message_filters/synchronizer.h>
@@ -139,6 +140,7 @@ private:
     std::shared_ptr<message_filters::Synchronizer<SyncPolicy>> sync_;
 
 
+    void build_map(const int index);
     bool loadConfig(const std::string& config_file);
     cv::Mat processImage(const Image::ConstSharedPtr& image_msg, size_t index);
     pcl::PointCloud<PointXYZRGBT>::Ptr colorPointCloud(const pcl::PointCloud<PointXYZRGBT>::Ptr& cloud,const std::vector<cv::Mat>& images);

@@ -11,6 +11,17 @@ if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   add_compile_options(-Wall -Wextra -Wpedantic)
 endif()
 
+# 查找OpenMP
+find_package(OpenMP REQUIRED)
+
+# 如果支持OpenMP，添加编译选项
+if(OpenMP_CXX_FOUND)
+  message(STATUS "Found OpenMP: ${OpenMP_CXX_VERSION}")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_CXX_FLAGS}")
+else()
+  message(WARNING "OpenMP not found, performance may be degraded")
+endif()
+
 # Find ROS 2 packages
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
@@ -45,6 +56,60 @@ add_library(color_pointscloud_component SHARED
   src/color_points_component.cpp
 )
 
+# 创建普通节点可执行文件
+add_executable(color_pointscloud_node
+  src/color_points_component.cpp  # 你需要创建这个文件
+  src/main.cpp
+)
+
+# 链接相同的库
+target_include_directories(color_pointscloud_node
+  PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<INSTALL_INTERFACE:include>
+)
+
+ament_target_dependencies(color_pointscloud_node
+  rclcpp
+  sensor_msgs
+  std_msgs
+  pcl_msgs
+  std_srvs
+  pcl_conversions
+  rclcpp_components
+  cv_bridge
+  image_transport
+  tf2
+  tf2_ros
+  tf2_eigen
+  tf2_geometry_msgs
+  message_filters
+  rosbag2_cpp
+)
+
+target_link_libraries(color_pointscloud_node
+  ${PCL_LIBRARIES}
+  ${OpenCV_LIBS}
+  yaml-cpp
+  Eigen3::Eigen
+)
+
+if(OpenMP_CXX_FOUND)
+  target_link_libraries(color_pointscloud_node OpenMP::OpenMP_CXX)
+endif()
+
+# 安装可执行文件
+install(TARGETS color_pointscloud_node
+  RUNTIME DESTINATION lib/${PROJECT_NAME}
+)
+
+# 安装launch文件
+install(DIRECTORY launch/
+  DESTINATION share/${PROJECT_NAME}/
+)
+
+
+
 # Set target properties
 target_include_directories(color_pointscloud_component
   PUBLIC
@@ -52,6 +117,9 @@ target_include_directories(color_pointscloud_component
     $<INSTALL_INTERFACE:include>
 )
 
+if(OpenMP_CXX_FOUND)
+  target_link_libraries(color_pointscloud_component OpenMP::OpenMP_CXX)
+endif()
 # Add ROS dependencies
 ament_target_dependencies(color_pointscloud_component
   rclcpp
@@ -104,7 +172,7 @@ install(DIRECTORY launch/
 
 # Install config files
 install(DIRECTORY config/
-  DESTINATION share/${PROJECT_NAME}/
+  DESTINATION share/${PROJECT_NAME}/config/
 )
 
 # Export dependencies

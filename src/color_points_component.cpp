@@ -1,4 +1,5 @@
 #include "color_points_component.hpp"
+#include <sensor_msgs/point_cloud2_iterator.hpp>
 
 POINT_CLOUD_REGISTER_POINT_STRUCT(color_pointscloud::PointXYZIRCAEDT, 
       (float, x, x)(float, y, y)(float, z, z)(std::uint8_t, intensity, intensity)
@@ -51,6 +52,10 @@ ColorPointsComponent::ColorPointsComponent(const rclcpp::NodeOptions & options)
     // 初始化发布者
     colored_cloud_pub_ = this->create_publisher<PointCloud2>(
         general_config_.output_topic, 10);
+
+    build_map(0);
+    build_map(1);
+    
     
     RCLCPP_INFO(this->get_logger(), "ColorPointsComponent initialized successfully");
     RCLCPP_INFO(this->get_logger(), "Output topic: %s", general_config_.output_topic.c_str());
@@ -304,98 +309,159 @@ void ColorPointsComponent::syncCallback(const PointCloud2::ConstSharedPtr& cloud
         cloud1_diff_ns = static_cast<uint32_t>(cloud1_time_ns - cloud2_time_ns);
     }
 
+    auto rosmsg_1 = std::chrono::high_resolution_clock::now();
     std::cout << "cloud_diff_ns: " << cloud1_diff_ns << " " << cloud2_diff_ns << std::endl;
+    
+    #if 0
 
-    // 预分配所有需要的点云
-    auto tmpRobosenseCloudIn_front = std::make_shared<pcl::PointCloud<PointXYZIRCAEDT>>();
-    auto tmpRobosenseCloudIn_rear = std::make_shared<pcl::PointCloud<PointXYZIRCAEDT>>();
-    auto cloud_conc = std::make_shared<pcl::PointCloud<PointXYZRGBT>>();
-    
-    // 优化1: 并行化转换，避免不必要的拷贝
-    #pragma omp parallel sections
-    {
-        #pragma omp section
+        auto cloud_conc = std::make_shared<pcl::PointCloud<PointXYZRGBT>>();
+        
+        cloud_conc->resize(cloud1_msg->width * cloud1_msg->height + cloud2_msg->width * cloud2_msg->height);
+        
+        // 优化2: 批量处理转换，减少内存访问开销
+        const PointCloudConfig& config_front = pointcloud_configs_[0];
+        const PointCloudConfig& config_rear = pointcloud_configs_[1];
+        
+        const Eigen::Matrix3f rot_front = config_front.extrinsic.rotation;
+        const Eigen::Vector3f trans_front = config_front.extrinsic.translation;
+        const Eigen::Matrix3f rot_rear = config_rear.extrinsic.rotation;
+        const Eigen::Vector3f trans_rear = config_rear.extrinsic.translation;
+        
+        const size_t size_front = cloud1_msg->width;
+        
+        // 优化3: 使用单次并行循环处理两个点云
+        // #pragma omp parallel
         {
-            // 直接从ROS消息转换，避免中间拷贝
-            pcl::fromROSMsg(*cloud1_msg, *tmpRobosenseCloudIn_front);
+            sensor_msgs::PointCloud2ConstIterator<float> it_x(*cloud1_msg, "x");
+            sensor_msgs::PointCloud2ConstIterator<float> it_y(*cloud1_msg, "y");
+            sensor_msgs::PointCloud2ConstIterator<float> it_z(*cloud1_msg, "z");
+            sensor_msgs::PointCloud2ConstIterator<u_int32_t> it_time_stamp(*cloud1_msg, "time_stamp");
+
+            // #pragma omp for nowait
+            for (size_t i = 0; it_x != it_x.end(); ++it_x, ++it_y, ++it_z,++it_time_stamp,++i) 
+            {
+                // 手动展开向量计算，避免临时对象
+                Eigen::Vector3f point_vec(*it_x, *it_y, *it_z);
+                point_vec = rot_front * point_vec;
+                
+                cloud_conc->points[i].x = point_vec.x() + trans_front.x();
+                cloud_conc->points[i].y = point_vec.y() + trans_front.y();
+                cloud_conc->points[i].z = point_vec.z() + trans_front.z();
+                // dst.time_stamp = src.time_stamp;
+                cloud_conc->points[i].time_stamp = *it_time_stamp + cloud1_diff_ns;
+            }
+
+            sensor_msgs::PointCloud2ConstIterator<float> it_x_rear(*cloud2_msg, "x");
+            sensor_msgs::PointCloud2ConstIterator<float> it_y_rear(*cloud2_msg, "y");
+            sensor_msgs::PointCloud2ConstIterator<float> it_z_rear(*cloud2_msg, "z");
+            sensor_msgs::PointCloud2ConstIterator<u_int32_t> it_time_stamp_rear(*cloud2_msg, "time_stamp");
+
+            for (size_t i = size_front; it_x_rear != it_x_rear.end(); ++it_x_rear, ++it_y_rear, ++it_z_rear,++it_time_stamp_rear,++i) 
+            {
+                // 手动展开向量计算，避免临时对象
+                Eigen::Vector3f point_vec(*it_x, *it_y, *it_z);
+                point_vec = rot_rear * point_vec;
+                
+                cloud_conc->points[i].x = point_vec.x() + trans_rear.x();
+                cloud_conc->points[i].y = point_vec.y() + trans_rear.y();
+                cloud_conc->points[i].z = point_vec.z() + trans_rear.z();
+                // dst.time_stamp = src.time_stamp;
+                cloud_conc->points[i].time_stamp = *it_time_stamp + cloud2_diff_ns;
+            }
+        }
+    # endif
+
+    # if 1
+         // 预分配所有需要的点云
+        auto tmpRobosenseCloudIn_front = std::make_shared<pcl::PointCloud<PointXYZIRCAEDT>>();
+        auto tmpRobosenseCloudIn_rear = std::make_shared<pcl::PointCloud<PointXYZIRCAEDT>>();
+        auto cloud_conc = std::make_shared<pcl::PointCloud<PointXYZRGBT>>();
+        
+        // 优化1: 并行化转换，避免不必要的拷贝
+        // #pragma omp parallel sections
+        {
+            // #pragma omp section
+            {
+                // 直接从ROS消息转换，避免中间拷贝
+                pcl::fromROSMsg(*cloud1_msg, *tmpRobosenseCloudIn_front);
+            }
+            
+            // #pragma omp section
+            {
+                pcl::fromROSMsg(*cloud2_msg, *tmpRobosenseCloudIn_rear);
+            }
         }
         
-        #pragma omp section
-        {
-            pcl::fromROSMsg(*cloud2_msg, *tmpRobosenseCloudIn_rear);
-        }
-    }
-    
-    // 预分配内存
-    const size_t size_lidar = tmpRobosenseCloudIn_front->size() + tmpRobosenseCloudIn_rear->size();
-    cloud_conc->resize(size_lidar);
-    
-    // 优化2: 批量处理转换，减少内存访问开销
-    const PointCloudConfig& config_front = pointcloud_configs_[0];
-    const PointCloudConfig& config_rear = pointcloud_configs_[1];
-    
-    const Eigen::Matrix3f rot_front = config_front.extrinsic.rotation;
-    const Eigen::Vector3f trans_front = config_front.extrinsic.translation;
-    const Eigen::Matrix3f rot_rear = config_rear.extrinsic.rotation;
-    const Eigen::Vector3f trans_rear = config_rear.extrinsic.translation;
-    
-    const size_t size_front = tmpRobosenseCloudIn_front->size();
-    
-    // 优化3: 使用单次并行循环处理两个点云
-    #pragma omp parallel
-    {
-        // 处理前部点云
-        #pragma omp for nowait
-        for (size_t i = 0; i < size_front; i++) 
-        {
-            const auto& src = tmpRobosenseCloudIn_front->points[i];
-            auto& dst = cloud_conc->points[i];
-            
-            // 手动展开向量计算，避免临时对象
-            Eigen::Vector3f point_vec(src.x, src.y, src.z);
-            point_vec = rot_front * point_vec;
-            
-            dst.x = point_vec.x() + trans_front.x();
-            dst.y = point_vec.y() + trans_front.y();
-            dst.z = point_vec.z() + trans_front.z();
-            // dst.time_stamp = src.time_stamp;
-            dst.time_stamp = src.time_stamp + cloud1_diff_ns;
-        }
+        // 预分配内存
+        const size_t size_lidar = tmpRobosenseCloudIn_front->size() + tmpRobosenseCloudIn_rear->size();
+        cloud_conc->resize(size_lidar);
         
-        // 处理后部点云
-        #pragma omp for nowait
-        for (size_t i = 0; i < tmpRobosenseCloudIn_rear->size(); i++) 
+        // 优化2: 批量处理转换，减少内存访问开销
+        const PointCloudConfig& config_front = pointcloud_configs_[0];
+        const PointCloudConfig& config_rear = pointcloud_configs_[1];
+        
+        const Eigen::Matrix3f rot_front = config_front.extrinsic.rotation;
+        const Eigen::Vector3f trans_front = config_front.extrinsic.translation;
+        const Eigen::Matrix3f rot_rear = config_rear.extrinsic.rotation;
+        const Eigen::Vector3f trans_rear = config_rear.extrinsic.translation;
+        
+        const size_t size_front = tmpRobosenseCloudIn_front->size();
+        
+        // 优化3: 使用单次并行循环处理两个点云
+        #pragma omp parallel
         {
-            const auto& src = tmpRobosenseCloudIn_rear->points[i];
-            auto& dst = cloud_conc->points[i + size_front];
+            // 处理前部点云
+            #pragma omp for nowait
+            for (size_t i = 0; i < size_front; i++) 
+            {
+                const auto& src = tmpRobosenseCloudIn_front->points[i];
+                auto& dst = cloud_conc->points[i];
+                
+                // 直接计算变换后的坐标，避免Eigen向量构造
+                const float x = src.x, y = src.y, z = src.z;
+                dst.x = rot_front(0,0)*x + rot_front(0,1)*y + rot_front(0,2)*z + trans_front.x();
+                dst.y = rot_front(1,0)*x + rot_front(1,1)*y + rot_front(1,2)*z + trans_front.y();
+                dst.z = rot_front(2,0)*x + rot_front(2,1)*y + rot_front(2,2)*z + trans_front.z();
+                dst.time_stamp = src.time_stamp + cloud1_diff_ns;
+            }
             
-            Eigen::Vector3f point_vec(src.x, src.y, src.z);
-            point_vec = rot_rear * point_vec;
-            
-            dst.x = point_vec.x() + trans_rear.x();
-            dst.y = point_vec.y() + trans_rear.y();
-            dst.z = point_vec.z() + trans_rear.z();
-            // dst.time_stamp = src.time_stamp;
-            dst.time_stamp = src.time_stamp + cloud2_diff_ns;
+            // 处理后部点云
+            #pragma omp for nowait
+            for (size_t i = 0; i < tmpRobosenseCloudIn_rear->size(); i++) 
+            {
+                const auto& src = tmpRobosenseCloudIn_rear->points[i];
+                auto& dst = cloud_conc->points[i + size_front];
+                
+                const float x = src.x, y = src.y, z = src.z;
+                dst.x = rot_rear(0,0)*x + rot_rear(0,1)*y + rot_rear(0,2)*z + trans_rear.x();
+                dst.y = rot_rear(1,0)*x + rot_rear(1,1)*y + rot_rear(1,2)*z + trans_rear.y();
+                dst.z = rot_rear(2,0)*x + rot_rear(2,1)*y + rot_rear(2,2)*z + trans_rear.z();
+                dst.time_stamp = src.time_stamp + cloud2_diff_ns;
+            }
         }
-    }
+    #endif
+
+    auto rosmsg_2 = std::chrono::high_resolution_clock::now();
+
     
     // 优化4: 并行处理图像
     std::vector<cv::Mat> images(2);
     
-    #pragma omp parallel sections
+    // #pragma omp parallel sections
     {
-        #pragma omp section
+        // #pragma omp section
         {
             images[0] = processImage(image1_msg, 0);
         }
         
-        #pragma omp section
+        // #pragma omp section
         {
             images[1] = processImage(image2_msg, 1);
         }
     }
     
+    auto rosmsg_3 = std::chrono::high_resolution_clock::now();
+
     // 优化5: 使用引用避免拷贝
     const auto& colored_cloud = colorPointCloud(cloud_conc, images);
     
@@ -403,6 +469,8 @@ void ColorPointsComponent::syncCallback(const PointCloud2::ConstSharedPtr& cloud
     sensor_msgs::msg::PointCloud2 colored_cloud_msg;
     pcl::toROSMsg(*colored_cloud, colored_cloud_msg);
     colored_cloud_msg.header = msg_header;
+
+    colored_cloud_pub_->publish(colored_cloud_msg);
     
     // 写入Bag文件
     bag_manager_->addMessage<sensor_msgs::msg::PointCloud2>(
@@ -411,7 +479,9 @@ void ColorPointsComponent::syncCallback(const PointCloud2::ConstSharedPtr& cloud
         msg_header.stamp
     );
     auto color_end = std::chrono::high_resolution_clock::now();
-    std::cout << "ros time: " << std::chrono::duration_cast<std::chrono::milliseconds>(color_end - rosmsg_start).count() << " ms" << 
+    std::cout << "time_trans: " << std::chrono::duration_cast<std::chrono::milliseconds>(rosmsg_2 - rosmsg_start).count() << "ms " << 
+    "time_undistort: " << std::chrono::duration_cast<std::chrono::milliseconds>(rosmsg_3 - rosmsg_2).count() << "ms " << 
+    "time_color: " << std::chrono::duration_cast<std::chrono::milliseconds>(color_end - rosmsg_3).count() << "ms " << 
     " points count: " << points_count <<" imu count: " << imu_count << " gnss count: " << gnss_count << std::endl;
 }
 
@@ -436,146 +506,116 @@ void ColorPointsComponent::handleBagControl(const std::shared_ptr<std_srvs::srv:
         response->success = true;
     }
 
-pcl::PointCloud<PointXYZRGBT>::Ptr ColorPointsComponent::colorPointCloud(
-const pcl::PointCloud<PointXYZRGBT>::Ptr& cloud,
-const std::vector<cv::Mat>& images)
+pcl::PointCloud<PointXYZRGBT>::Ptr ColorPointsComponent::colorPointCloud(const pcl::PointCloud<PointXYZRGBT>::Ptr& cloud, const std::vector<cv::Mat>& images)
 {
+    // 创建新的点云并拷贝原始数据
     auto colored_cloud = pcl::PointCloud<PointXYZRGBT>::Ptr(new pcl::PointCloud<PointXYZRGBT>());
     
-    // 预分配内存以提高性能
-    colored_cloud->reserve(cloud->size());
+    // 设置与输入点云相同的大小，并复制所有点
+    *colored_cloud = *cloud;  
     
-    // 提前提取配置信息到局部变量，避免循环中频繁访问
-    std::vector<bool> image_valid(images.size());
-    std::vector<const IntrinsicParams*> intrinsics_ptrs(images.size(), nullptr);
-    std::vector<const ExtrinsicParams*> extrinsics_ptrs(images.size(), nullptr);
-    
-    for (size_t j = 0; j < images.size(); ++j) {
-        image_valid[j] = !images[j].empty();
-        if (j < image_configs_.size()) {
-            intrinsics_ptrs[j] = &image_configs_[j].intrinsic;
-            extrinsics_ptrs[j] = &image_configs_[j].extrinsic;
-        }
+    // 检查图像有效性
+    if (images.size() != 2 || image_configs_.size() != 2) {
+        RCLCPP_ERROR(this->get_logger(), "V2: 输入图像数量必须为2, 且对应相机配置数量也必须为2");
+        return colored_cloud;
     }
     
-    // 获取图像尺寸用于边界检查
-    std::vector<cv::Size> image_sizes(images.size());
-    for (size_t j = 0; j < images.size(); ++j) {
-        image_sizes[j] = images[j].size();
-    }
+    bool img0_valid = !images[0].empty();
+    bool img1_valid = !images[1].empty();
+    cv::Size img0_size = images[0].size();
+    cv::Size img1_size = images[1].size();
     
-    // 使用OpenMP并行处理所有点
-    #pragma omp parallel
+    // 获取相机的内参和外参
+    const IntrinsicParams* intrinsic0 = &image_configs_[0].intrinsic;
+    const IntrinsicParams* intrinsic1 = &image_configs_[1].intrinsic;
+    const ExtrinsicParams* extrinsic0 = &image_configs_[0].extrinsic;
+    const ExtrinsicParams* extrinsic1 = &image_configs_[1].extrinsic;
+    
+    // 预计算变换矩阵的旋转和平移部分
+    Eigen::Matrix3f R0 = extrinsic0->transformation.block<3,3>(0,0);
+    Eigen::Vector3f t0 = extrinsic0->transformation.block<3,1>(0,3);
+    Eigen::Matrix3f R1 = extrinsic1->transformation.block<3,3>(0,0);
+    Eigen::Vector3f t1 = extrinsic1->transformation.block<3,1>(0,3);
+    
+    // 统计成功着色的点数
+    size_t colored_count = 0;
+    
+    #pragma omp parallel for schedule(guided) reduction(+:colored_count)
+    for (size_t i = 0; i < cloud->size(); ++i) 
     {
-        // 每个线程有自己的局部点云，避免锁竞争
-        pcl::PointCloud<PointXYZRGBT>::Ptr local_cloud(new pcl::PointCloud<PointXYZRGBT>());
-        local_cloud->reserve(cloud->size() / omp_get_num_threads() + 1);
+        const auto& point = cloud->points[i];
         
-        #pragma omp for nowait schedule(dynamic, 100)  // 动态调度，块大小为100
-        for (size_t i = 0; i < cloud->size(); ++i) 
+        // 根据x坐标选择图像索引
+        int img_idx = (point.x >= 0.0f) ? 0 : 1;
+        
+        bool point_colored = false;
+        
+        // 只处理选中的图像
+        if ((img_idx == 0 && img0_valid && intrinsic0) || 
+            (img_idx == 1 && img1_valid && intrinsic1)) 
         {
-            const auto& point = cloud->points[i];
-            bool point_colored = false;
+            // 计算点在相机坐标系中的位置
+            Eigen::Vector3f point_eigen(point.x, point.y, point.z);
+            Eigen::Vector3f point_camera;
             
-            // 为每个点寻找对应的图像颜色
-            for (size_t j = 0; j < images.size() && !point_colored; ++j) 
-            {
-                if (!image_valid[j]) continue;
-                
-                // 计算点在相机坐标系中的位置
-                Eigen::Vector3f point_camera;
-                if (general_config_.use_tf) {
-                    // 使用TF变换（需要实现TF查询）
-                    // point_camera = transformPointWithTF(point, i, j);
-                } else {
-                    // 使用配置文件中的外参
-                    if (extrinsics_ptrs[j] != nullptr) {
-                        const auto& transformation = extrinsics_ptrs[j]->transformation;
-                        Eigen::Vector3f point_eigen(point.x, point.y, point.z);
-                        point_camera = transformation.block<3,3>(0,0) * point_eigen + 
-                                    transformation.block<3,1>(0,3);
-                    }
-                }
-                
-                // 如果点在相机前方
-                if (point_camera.z() > 0.1f) 
-                {
-                    // 投影到图像平面
-                    if (intrinsics_ptrs[j] != nullptr) {
-                        const auto& intrinsic = *intrinsics_ptrs[j];
-                        
-                        // 优化：使用提前计算好的逆深度
-                        float inv_z = 1.0f / point_camera.z();
-                        float u_f = intrinsic.fx * point_camera.x() * inv_z + intrinsic.cx;
-                        float v_f = intrinsic.fy * point_camera.y() * inv_z + intrinsic.cy;
-                        
-                        // 检查点是否在图像范围内
-                        int u = static_cast<int>(u_f);
-                        int v = static_cast<int>(v_f);
-                        
-                        if (u >= 0 && u < image_sizes[j].width && 
-                            v >= 0 && v < image_sizes[j].height) 
-                        {
-                            // 使用最近邻采样（简单高效）
-                            cv::Vec3b color = images[j].at<cv::Vec3b>(v, u);
-                            
-                            // 创建彩色点
-                            PointXYZRGBT colored_point = point;
-                            colored_point.rgba_struct.r = color[2];
-                            colored_point.rgba_struct.g = color[1];
-                            colored_point.rgba_struct.b = color[0];
-                            colored_point.rgba_struct.a = 255;
-                            local_cloud->push_back(colored_point);
-                            point_colored = true;
-                        }
-                    }
-                }
+            if (img_idx == 0) {
+                point_camera = R0 * point_eigen + t0;
+            } else {
+                point_camera = R1 * point_eigen + t1;
             }
             
-            // 如果点没有被任何相机看到，添加默认颜色（灰色）
-            if (!point_colored) {
-                PointXYZRGBT uncolored_point = point;
-                uncolored_point.rgba_struct.r = 128;
-                uncolored_point.rgba_struct.g = 128;
-                uncolored_point.rgba_struct.b = 128;
-                uncolored_point.rgba_struct.a = 255;
-                local_cloud->push_back(uncolored_point);
+            // 如果点在相机前方
+            if (point_camera.z() > 0.1f) 
+            {
+                // 投影到图像平面
+                const IntrinsicParams* intrinsic = (img_idx == 0) ? intrinsic0 : intrinsic1;
+                const cv::Mat& image = (img_idx == 0) ? images[0] : images[1];
+                const cv::Size& img_size = (img_idx == 0) ? img0_size : img1_size;
+                
+                // 优化：使用提前计算好的逆深度
+                float inv_z = 1.0f / point_camera.z();
+                float u_f = intrinsic->fx * point_camera.x() * inv_z + intrinsic->cx;
+                float v_f = intrinsic->fy * point_camera.y() * inv_z + intrinsic->cy;
+                
+                // 检查点是否在图像范围内
+                int u = static_cast<int>(u_f);
+                int v = static_cast<int>(v_f);
+                
+                if (u >= 0 && u < img_size.width && v >= 0 && v < img_size.height) 
+                {
+                    // 使用最近邻采样（简单高效）
+                    cv::Vec3b color = image.at<cv::Vec3b>(v, u);
+                    
+                    colored_cloud->points[i].rgba_struct.r = color[2];
+                    colored_cloud->points[i].rgba_struct.g = color[1];
+                    colored_cloud->points[i].rgba_struct.b = color[0];
+                    colored_cloud->points[i].rgba_struct.a = 255;
+                    point_colored = true;
+                    colored_count++;
+                }
             }
         }
         
-        // 合并线程本地点云
-        #pragma omp critical(merge_clouds)
-        {
-            *colored_cloud += *local_cloud;
+        if (!point_colored) {
+
+            // 设置默认颜色
+            colored_cloud->points[i].rgba_struct.r = 128;
+            colored_cloud->points[i].rgba_struct.g = 128;
+            colored_cloud->points[i].rgba_struct.b = 128;
+            colored_cloud->points[i].rgba_struct.a = 255;
         }
     }
     
-    // RCLCPP_INFO(this->get_logger(), "Colored point cloud created with %ld points (from %ld input points)", 
-    //         colored_cloud->size(), cloud->size());
     return colored_cloud;
 }
+    
+    
 
-cv::Mat ColorPointsComponent::processImage(const Image::ConstSharedPtr& image_msg, size_t index)
+void ColorPointsComponent::build_map(const int index)
 {
-    cv::Mat image;
-    try {
-        cv_bridge::CvImagePtr cv_ptr = cv_bridge::toCvCopy(image_msg, sensor_msgs::image_encodings::BGR8);
-        image = cv_ptr->image;
-
-        // 去畸变
+    // 去畸变
         IntrinsicParams intr_params = image_configs_[index].intrinsic;
         
-        // 检查图像和畸变系数有效性
-        if (image.empty()) {
-            RCLCPP_ERROR(this->get_logger(), "Image %zu is empty", index);
-            return cv::Mat();
-        }
-        
-        // 如果没有畸变系数，返回原图
-        if (intr_params.k.empty()) {
-            RCLCPP_DEBUG(this->get_logger(), "No distortion coefficients for image %zu, returning original", index);
-            return image;
-        }
         
         // 创建OpenCV相机矩阵
         cv::Mat camera_matrix = (cv::Mat_<double>(3, 3) << 
@@ -597,18 +637,13 @@ cv::Mat ColorPointsComponent::processImage(const Image::ConstSharedPtr& image_ms
             for (size_t i = 0; i < 5 && i < intr_params.k.size(); ++i) {
                 dist_coeffs.at<double>(0, i) = intr_params.k[i];
             }
-        } else {
-            RCLCPP_WARN(this->get_logger(), "Invalid distortion coefficients size %zu for image %zu", 
-                    intr_params.k.size(), index);
-            return image;
-        }
+        } else 
         
         // 使用映射表方法进行去畸变（保持内参不变）
         cv::Mat undistorted;
         
         // 检查是否需要初始化映射表
-        if (undistort_maps_[index].first.empty() || undistort_maps_[index].second.empty() ||
-            image_size_cache_[index] != image.size()) {
+        if (undistort_maps_[index].first.empty() || undistort_maps_[index].second.empty()) {
             
             // 初始化映射表（使用原始内参保持内参不变）
             cv::Mat new_camera_matrix = camera_matrix.clone();
@@ -619,19 +654,26 @@ cv::Mat ColorPointsComponent::processImage(const Image::ConstSharedPtr& image_ms
                 dist_coeffs,          // 畸变系数
                 cv::Mat(),            // 无旋转矩阵
                 new_camera_matrix,    // 使用相同的内参矩阵（保持内参不变）
-                image.size(),         // 输出尺寸与输入相同
+                cv::Size(1920, 1080),         // 输出尺寸与输入相同
                 CV_32FC1,             // 映射表数据类型
                 map1, map2           // 输出的映射表
             );
             
             // 缓存映射表和图像尺寸
             undistort_maps_[index] = std::make_pair(map1, map2);
-            image_size_cache_[index] = image.size();
-            
-            RCLCPP_DEBUG(this->get_logger(), 
-                "Initialized undistort maps for image %zu with size %dx%d", 
-                index, image.cols, image.rows);
+            image_size_cache_[index] = cv::Size(1920, 1080);
+
         }
+        
+}
+
+cv::Mat ColorPointsComponent::processImage(const Image::ConstSharedPtr& image_msg, size_t index)
+{
+    cv::Mat image;
+    try {
+        cv_bridge::CvImagePtr cv_ptr = cv_bridge::toCvCopy(image_msg, sensor_msgs::image_encodings::BGR8);
+        image = cv_ptr->image;
+        cv::Mat undistorted = cv::Mat::zeros(image_size_cache_[index], image.type());
         
         // 应用去畸变映射
         cv::remap(image, undistorted, 
@@ -641,12 +683,6 @@ cv::Mat ColorPointsComponent::processImage(const Image::ConstSharedPtr& image_ms
                 cv::BORDER_CONSTANT);
         
         image = undistorted;
-
-        RCLCPP_DEBUG(this->get_logger(), 
-            "Processed image %zu: %dx%d, Intrinsic unchanged: fx=%.2f, fy=%.2f, cx=%.2f, cy=%.2f", 
-            index, image.cols, image.rows,
-            intr_params.fx, intr_params.fy, intr_params.cx, intr_params.cy);
-        
     } catch (const cv_bridge::Exception& e) {
         RCLCPP_ERROR(this->get_logger(), "CV Bridge error processing image %zu: %s", index, e.what());
     } catch (const cv::Exception& e) {
