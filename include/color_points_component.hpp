@@ -39,6 +39,7 @@
 #include "bag_manager.hpp"
 
 using PointCloud2 = sensor_msgs::msg::PointCloud2;
+// using Image = sensor_msgs::msg::Image;
 using Image = sensor_msgs::msg::CompressedImage;
 using namespace std::chrono_literals;
 
@@ -111,12 +112,14 @@ private:
 
     std::vector<std::pair<cv::Mat, cv::Mat>> undistort_maps_;
     std::vector<cv::Size> image_size_cache_;
+    std::vector<bool> build_map_flag_;
 
     struct GeneralConfig {
         int image_queue_size;
         double max_time_diff;
         bool use_tf;
         std::string output_topic;
+        std::string bag_file_path;
     };
 
     GeneralConfig general_config_;
@@ -142,8 +145,10 @@ private:
 
     void build_map(const int index);
     bool loadConfig(const std::string& config_file);
-    cv::Mat processImage(const Image::ConstSharedPtr& image_msg, size_t index);
+    cv::Mat processJPEGImage(const Image::ConstSharedPtr& image_msg, size_t index);
+    cv::Mat processRGBAImage(const Image::ConstSharedPtr& image_msg);
     pcl::PointCloud<PointXYZRGBT>::Ptr colorPointCloud(const pcl::PointCloud<PointXYZRGBT>::Ptr& cloud,const std::vector<cv::Mat>& images);
+    pcl::PointCloud<PointXYZRGBT>::Ptr colorPointCloud_V1(const pcl::PointCloud<PointXYZRGBT>::Ptr& cloud,const std::vector<cv::Mat>& images);
     void printConfigSummary();
     void initSubscribers();
     void initSynchronizer();
@@ -154,6 +159,7 @@ private:
                   const Image::ConstSharedPtr& image2_msg);
     void handleBagControl(const std::shared_ptr<std_srvs::srv::SetBool::Request> request,
                        const std::shared_ptr<std_srvs::srv::SetBool::Response> response);
+    
 };
 
 } // namespace color_pointscloud

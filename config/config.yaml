@@ -4,6 +4,8 @@ general:
   max_time_diff: 0.06  # 同步数据允许的最大时间差（秒）
   use_tf: false
   output_topic: "/colored_pointcloud"  # 合并后的输出话题
+  bag_file_path: "/home/pix/data/colcor_points/test_bag"  # 输出的bag文件路径
+
 
 # 73th
 # tf2 lidar -> base_link 点云话题配置
