@@ -23,19 +23,31 @@
 class BagManager
 {
 public:
-  explicit BagManager(const std::string & bag_file_name, size_t max_queue_size = 10000)
-    : bag_file_name_(bag_file_name)
+  explicit BagManager(const std::string & bag_file_path, size_t max_queue_size = 10000)
+    : bag_file_name_(bag_file_path)
     , max_queue_size_(max_queue_size)
     , stop_requested_(false)
     , message_count_(0)
     , written_count_(0)
   {
-    // 创建目录
-    auto dir = rcpputils::fs::path(bag_file_name).parent_path();
-    if (!dir.empty()) {
-      rcpputils::fs::remove_all(dir);
-      rcpputils::fs::create_directories(dir);
+    // 1. 构造时间戳子目录名：20251012_103012
+    auto now = std::chrono::system_clock::now();
+    auto time_t = std::chrono::system_clock::to_time_t(now);
+    std::stringstream ss;
+    ss << std::put_time(std::localtime(&time_t), "%Y%m%d_%H%M%S");
+    std::string time_folder = ss.str();
+
+    // 2. 组合最终路径：bag_file_path / 20251012_103012
+    rcpputils::fs::path root(bag_file_path);
+    rcpputils::fs::path dir = root / time_folder;
+
+    /* 3. 仅当目录名 == time_folder 时才允许清空 */
+    if (!rcpputils::fs::exists(root)) 
+    {
+      std::cout << "BagManager: Created directory " << root.string() << std::endl;
+      rcpputils::fs::create_directories(root);
     }
+    bag_file_name_ = dir.string();
 
     // 初始化writer
     writer_ = std::make_unique<rosbag2_cpp::Writer>();
@@ -293,12 +305,6 @@ private:
   std::deque<QueuedMessage> message_queue_;
   mutable std::mutex queue_mutex_;
   
-  // 状态控制
-  mutable std::mutex state_mutex_;
-  std::condition_variable cv_;
-  bool recording_ = false;
-  bool stop_requested_ = false;
-  
   std::thread writing_thread_;
   
   // Topic管理
@@ -309,6 +315,12 @@ private:
   size_t max_queue_size_;
   std::atomic<size_t> message_count_;
   std::atomic<size_t> written_count_;
+
+  // 状态控制
+  mutable std::mutex state_mutex_;
+  std::condition_variable cv_;
+  bool recording_ = false;
+  bool stop_requested_ = false;
 };
 
 #endif  // BAG_MANAGER_HPP_

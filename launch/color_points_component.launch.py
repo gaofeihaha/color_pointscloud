@@ -61,4 +61,4 @@ def generate_launch_description():
         output='screen'
     )
     
-    return launch.LaunchDescription([container, load_component])
+    return launch.LaunchDescription([load_component])
