@@ -1,4 +1,5 @@
 #include "color_points_component.hpp"
+#include "params_parser.hpp"
 #include <sensor_msgs/point_cloud2_iterator.hpp>
 
 POINT_CLOUD_REGISTER_POINT_STRUCT(color_pointscloud::PointXYZIRCAEDT, 
@@ -71,6 +72,38 @@ ColorPointsComponent::~ColorPointsComponent()
 
 bool ColorPointsComponent::loadConfig(const std::string& config_file)
 {
+    static TFQueryTool tf_query_tool;
+
+    static  CameraParamsParser camera_params_parser;
+    if (!camera_params_parser.loadFromFile("/home/pix/pix/parameter/sensor_kit/robobus_sensor_kit_description/intrinsic_parameters/camera1_params.yaml")) {
+        std::cerr << "Failed to load camera YAML file!" << std::endl;
+        return 1;
+    }
+    else{
+      // 访问基础参数
+        std::cout << "相机名称: " << camera_params_parser.getCameraName() << std::endl;
+        std::cout << "图像尺寸: " << camera_params_parser.getImageWidth() << "x" 
+                  << camera_params_parser.getImageHeight() << std::endl;
+        
+        // 访问相机内参矩阵
+        auto camera_matrix = camera_params_parser.getCameraMatrix();
+        std::cout << "相机内参矩阵 (3x3):" << std::endl;
+        for (const auto& row : camera_matrix) {
+            for (double val : row) {
+                std::cout << val << " ";
+            }
+            std::cout << std::endl;
+        }
+        
+        // 访问畸变系数
+        auto dist_coeffs = camera_params_parser.getDistortionCoefficients();
+        std::cout << "畸变系数: ";
+        for (double val : dist_coeffs) {
+            std::cout << val << " ";
+        }
+    }
+
+
     try {
         YAML::Node config = YAML::LoadFile(config_file);
         
@@ -81,6 +114,16 @@ bool ColorPointsComponent::loadConfig(const std::string& config_file)
         general_config_.use_tf = general["use_tf"].as<bool>();
         general_config_.output_topic = general["output_topic"].as<std::string>();
         general_config_.bag_file_path = general["bag_file_path"].as<std::string>();
+        general_config_.params_file_path = general["params_file_path"].as<std::string>();
+
+        if (!tf_query_tool.loadYAMLFile(general_config_.params_file_path + "/extrinsic_parameters/sensor_kit_calibration.yaml")) {
+            std::cerr << "Failed to load YAML file!" << std::endl;
+            return false;
+        }
+        if (!tf_query_tool.loadYAMLFile(general_config_.params_file_path + "/extrinsic_parameters/sensors_calibration.yaml")) {
+                std::cerr << "Failed to load YAML file!" << std::endl;
+                return false;
+            }
         
         // 加载点云配置
         pointcloud_configs_.clear();
@@ -89,23 +132,17 @@ bool ColorPointsComponent::loadConfig(const std::string& config_file)
             PointCloudConfig config;
             config.topic = pc_config["topic"].as<std::string>();
             config.frame_id = pc_config["frame_id"].as<std::string>();
+
+            // 查询变换
+            auto result = tf_query_tool.queryTransform("base_link", config.frame_id);
+            result.print(true);
             
-            // 解析外参
-            auto ext = pc_config["extrinsic_params"];
-            auto rot = ext["rotation"].as<std::vector<double>>();
-            auto trans = ext["translation"].as<std::vector<double>>();
-            
-            Eigen::Matrix3f rotation_matrix;
-            rotation_matrix << rot[0], rot[1], rot[2],
-                              rot[3], rot[4], rot[5],
-                              rot[6], rot[7], rot[8];
-            
-            config.extrinsic.rotation = rotation_matrix;
-            config.extrinsic.translation = Eigen::Vector3f(trans[0], trans[1], trans[2]);
+            config.extrinsic.rotation = result.rotation_matrix;
+            config.extrinsic.translation = result.translation;
             
             // 构建变换矩阵
             config.extrinsic.transformation.setIdentity();
-            config.extrinsic.transformation.block<3,3>(0,0) = rotation_matrix;
+            config.extrinsic.transformation.block<3,3>(0,0) = config.extrinsic.rotation ;
             config.extrinsic.transformation.block<3,1>(0,3) = config.extrinsic.translation;
             
             pointcloud_configs_.push_back(config);
@@ -118,14 +155,26 @@ bool ColorPointsComponent::loadConfig(const std::string& config_file)
             ImageConfig config;
             config.topic = img_config["topic"].as<std::string>();
             config.name = img_config["name"].as<std::string>();
+            config.frame_id = img_config["frame_id"].as<std::string>();
+
+            auto result = tf_query_tool.queryTransform(config.frame_id, "base_link");
+            result.print(true);
+
+            std::string params_file_path = general_config_.params_file_path + "/intrinsic_parameters/" + config.name + ".yaml";
+
+            if(!camera_params_parser.loadFromFile(params_file_path)){
+                std::cerr << "Failed to load camera YAML file!" << std::endl;
+                return false;
+            }
             
             // 解析内参
             auto intr = img_config["intrinsic_params"];
-            config.intrinsic.fx = intr["fx"].as<double>();
-            config.intrinsic.fy = intr["fy"].as<double>();
-            config.intrinsic.cx = intr["cx"].as<double>();
-            config.intrinsic.cy = intr["cy"].as<double>();
-            config.intrinsic.k = intr["k"].as<std::vector<double>>();
+            auto mat = camera_params_parser.getCameraMatrix();
+            config.intrinsic.fx = mat[0][0];
+            config.intrinsic.fy = mat[1][1];
+            config.intrinsic.cx = mat[0][2];
+            config.intrinsic.cy = mat[1][2];
+            config.intrinsic.k = camera_params_parser.getDistortionCoefficients();
             
             // 构建内参矩阵
             config.intrinsic.camera_matrix.setZero();
@@ -134,23 +183,27 @@ bool ColorPointsComponent::loadConfig(const std::string& config_file)
             config.intrinsic.camera_matrix(0,2) = config.intrinsic.cx;
             config.intrinsic.camera_matrix(1,2) = config.intrinsic.cy;
             config.intrinsic.camera_matrix(2,2) = 1.0;
+
+            std::cout<<"Camera Matrix:"<<std::endl;
+            for (int i = 0; i < 3; ++i) {
+                for (int j = 0; j < 3; ++j) {
+                    std::cout << config.intrinsic.camera_matrix(i,j) << " ";
+                }
+                std::cout << std::endl;
+            }
+            std::cout << "Distortion Coefficients: ";
+            for (double val : config.intrinsic.k) {
+                std::cout << val << " ";
+            }
+            std::cout << std::endl;
             
             // 解析外参
-            auto ext = img_config["extrinsic_params"];
-            auto rot = ext["rotation"].as<std::vector<double>>();
-            auto trans = ext["translation"].as<std::vector<double>>();
-            
-            Eigen::Matrix3f rotation_matrix;
-            rotation_matrix << rot[0], rot[1], rot[2],
-                              rot[3], rot[4], rot[5],
-                              rot[6], rot[7], rot[8];
-            
-            config.extrinsic.rotation = rotation_matrix;
-            config.extrinsic.translation = Eigen::Vector3f(trans[0], trans[1], trans[2]);
+            config.extrinsic.rotation = result.rotation_matrix;
+            config.extrinsic.translation = result.translation;
             
             // 构建变换矩阵
             config.extrinsic.transformation.setIdentity();
-            config.extrinsic.transformation.block<3,3>(0,0) = rotation_matrix;
+            config.extrinsic.transformation.block<3,3>(0,0) = config.extrinsic.rotation;
             config.extrinsic.transformation.block<3,1>(0,3) = config.extrinsic.translation;
             
             image_configs_.push_back(config);
@@ -886,53 +939,71 @@ pcl::PointCloud<PointXYZRGBT>::Ptr ColorPointsComponent::colorPointCloud(
 void ColorPointsComponent::build_map(const int index)
 {
     // 去畸变
-        IntrinsicParams intr_params = image_configs_[index].intrinsic;
+    IntrinsicParams intr_params = image_configs_[index].intrinsic;
+    
+    
+    // 创建OpenCV相机矩阵
+    cv::Mat camera_matrix = (cv::Mat_<double>(3, 3) << 
+        intr_params.fx, 0, intr_params.cx,
+        0, intr_params.fy, intr_params.cy,
+        0, 0, 1);
+    
+    // 将畸变系数转换为cv::Mat
+    cv::Mat dist_coeffs;
+    if (intr_params.k.size() == 8) 
+    {
         
-        
-        // 创建OpenCV相机矩阵
-        cv::Mat camera_matrix = (cv::Mat_<double>(3, 3) << 
-            intr_params.fx, 0, intr_params.cx,
-            0, intr_params.fy, intr_params.cy,
-            0, 0, 1);
-        
-        // 将畸变系数转换为cv::Mat
-        cv::Mat dist_coeffs;
-        if (intr_params.k.size() == 8) {
+        if(intr_params.k[5] + intr_params.k[6] == 0.0 + intr_params.k[7] < 1e-5)
+        {
+            dist_coeffs = cv::Mat_<double>(1, 5);
+            for (size_t i = 0; i < 5 && i < intr_params.k.size(); ++i) 
+            {
+                dist_coeffs.at<double>(0, i) = intr_params.k[i];
+            }
+        }
+        else
+        {
             // 8参数畸变模型 [k1, k2, p1, p2, k3, k4, k5, k6]
             dist_coeffs = cv::Mat_<double>(1, 8);
-            for (size_t i = 0; i < 8; ++i) {
-                dist_coeffs.at<double>(0, i) = intr_params.k[i];
-            }
-        } else if (intr_params.k.size() >= 5) {
-            // 至少需要5个参数 [k1, k2, p1, p2, k3]
-            dist_coeffs = cv::Mat_<double>(1, 5);
-            for (size_t i = 0; i < 5 && i < intr_params.k.size(); ++i) {
+            for (size_t i = 0; i < 8; ++i) 
+            {
                 dist_coeffs.at<double>(0, i) = intr_params.k[i];
             }
         }
         
-        // 检查是否需要初始化映射表
-        if (undistort_maps_[index].first.empty() || undistort_maps_[index].second.empty()) {
-            
-            // 初始化映射表（使用原始内参保持内参不变）
-            cv::Mat new_camera_matrix = camera_matrix.clone();
-            cv::Mat map1, map2;
-            
-            cv::initUndistortRectifyMap(
-                camera_matrix,        // 原始相机内参
-                dist_coeffs,          // 畸变系数
-                cv::Mat(),            // 无旋转矩阵
-                new_camera_matrix,    // 使用相同的内参矩阵（保持内参不变）
-                cv::Size(1920, 1080),         // 输出尺寸与输入相同
-                CV_32FC1,             // 映射表数据类型
-                map1, map2           // 输出的映射表
-            );
-            
-            // 缓存映射表和图像尺寸
-            undistort_maps_[index] = std::make_pair(map1, map2);
-            image_size_cache_[index] = cv::Size(1920, 1080);
-
+    } 
+    else if (intr_params.k.size() == 5) 
+    {
+        // 至少需要5个参数 [k1, k2, p1, p2, k3]
+        dist_coeffs = cv::Mat_<double>(1, 5);
+        for (size_t i = 0; i < 5 && i < intr_params.k.size(); ++i) 
+        {
+            dist_coeffs.at<double>(0, i) = intr_params.k[i];
         }
+    }
+    
+    // 检查是否需要初始化映射表
+    if (undistort_maps_[index].first.empty() || undistort_maps_[index].second.empty()) {
+        
+        // 初始化映射表（使用原始内参保持内参不变）
+        cv::Mat new_camera_matrix = camera_matrix.clone();
+        cv::Mat map1, map2;
+        
+        cv::initUndistortRectifyMap(
+            camera_matrix,        // 原始相机内参
+            dist_coeffs,          // 畸变系数
+            cv::Mat(),            // 无旋转矩阵
+            new_camera_matrix,    // 使用相同的内参矩阵（保持内参不变）
+            cv::Size(1920, 1080),         // 输出尺寸与输入相同
+            CV_32FC1,             // 映射表数据类型
+            map1, map2           // 输出的映射表
+        );
+        
+        // 缓存映射表和图像尺寸
+        undistort_maps_[index] = std::make_pair(map1, map2);
+        image_size_cache_[index] = cv::Size(1920, 1080);
+
+    }
         
 }
 

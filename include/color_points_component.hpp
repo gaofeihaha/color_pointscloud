@@ -94,6 +94,7 @@ struct PointCloudConfig {
 struct ImageConfig {
     std::string topic;
     std::string name;
+    std::string frame_id;
     IntrinsicParams intrinsic;
     ExtrinsicParams extrinsic;
 };
@@ -120,6 +121,7 @@ private:
         bool use_tf;
         std::string output_topic;
         std::string bag_file_path;
+        std::string params_file_path;
     };
 
     GeneralConfig general_config_;
