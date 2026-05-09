@@ -35,30 +35,28 @@
 #     return launch.LaunchDescription([container])
 
 import launch
-from launch.actions import ExecuteProcess
-from launch_ros.actions import Node
+from launch_ros.actions import ComposableNodeContainer
+from launch_ros.descriptions import ComposableNode
 
 def generate_launch_description():
-    # 首先启动容器（如果还没有运行）
-    container = Node(
+    """Launch color_pointscloud component in its own container."""
+    
+    container = ComposableNodeContainer(
+        name='color_points_container',  # 改了一个不冲突的名字
+        namespace='',
         package='rclcpp_components',
         executable='component_container',
-        name='nvenc_multicam_container',
-        output='screen'
-    )
-    
-    # 然后加载组件
-    load_component = ExecuteProcess(
-        cmd=[
-            'ros2', 'component', 'load',
-            '/nvenc_multicam_container',
-            'color_pointscloud',
-            'color_pointscloud::ColorPointsComponent',
-            '--node-name', 'color_points_component',
-            # 如果需要参数
-            '-p', 'use_sim_time:=false'
+        composable_node_descriptions=[
+            ComposableNode(
+                package='color_pointscloud',
+                plugin='color_pointscloud::ColorPointsComponent',
+                name='color_points_component',
+                parameters=[
+                    {'use_sim_time': False},
+                ]
+            ),
         ],
-        output='screen'
+        output='screen',
     )
-    
-    return launch.LaunchDescription([load_component])
+
+    return launch.LaunchDescription([container])

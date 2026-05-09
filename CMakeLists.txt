@@ -39,6 +39,7 @@ find_package(tf2_eigen REQUIRED)
 find_package(tf2_geometry_msgs REQUIRED)
 find_package(message_filters REQUIRED)
 find_package(rosbag2_cpp REQUIRED)
+find_package(ament_index_cpp REQUIRED)
 
 # Find system packages
 find_package(PCL REQUIRED COMPONENTS common io filters)
@@ -85,6 +86,7 @@ ament_target_dependencies(color_pointscloud_node
   tf2_geometry_msgs
   message_filters
   rosbag2_cpp
+  ament_index_cpp
 )
 
 target_link_libraries(color_pointscloud_node
@@ -137,6 +139,7 @@ ament_target_dependencies(color_pointscloud_component
   tf2_geometry_msgs
   message_filters
   rosbag2_cpp
+  ament_index_cpp
 )
 
 # Link system libraries
@@ -173,6 +176,12 @@ install(DIRECTORY launch/
 # Install config files
 install(DIRECTORY config/
   DESTINATION share/${PROJECT_NAME}/config/
+)
+
+# Install scripts
+install(DIRECTORY script/
+  DESTINATION share/${PROJECT_NAME}/script/
+  USE_SOURCE_PERMISSIONS
 )
 
 # Export dependencies

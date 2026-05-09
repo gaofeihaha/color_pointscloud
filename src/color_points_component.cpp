@@ -1,6 +1,7 @@
 #include "color_points_component.hpp"
 #include <sensor_msgs/point_cloud2_iterator.hpp>
 #include "params_parser.hpp"
+#include <ament_index_cpp/get_package_share_directory.hpp>
 
 POINT_CLOUD_REGISTER_POINT_STRUCT(color_pointscloud::PointXYZIRCAEDT, 
       (float, x, x)(float, y, y)(float, z, z)(std::uint8_t, intensity, intensity)
@@ -55,17 +56,38 @@ ColorPointsComponent::ColorPointsComponent(const rclcpp::NodeOptions & options)
     colored_cloud_pub_ = this->create_publisher<PointCloud2>(
         general_config_.output_topic, 10);
   
+    // 启动TCP server
+    tcp_server_ = std::make_unique<TcpServer>(8888);
+    tcp_server_->setCallback(std::bind(&ColorPointsComponent::handleTcpRequest, this, std::placeholders::_1));
+    if (tcp_server_->start()) {
+        RCLCPP_INFO(this->get_logger(), "TCP Server started on port 8888");
+    } else {
+        RCLCPP_ERROR(this->get_logger(), "Failed to start TCP Server");
+    }
     
+    // 初始化并启动看门狗定时器 (100ms 检查一次)
+    watchdog_timer_ = this->create_wall_timer(
+        std::chrono::milliseconds(100),
+        std::bind(&ColorPointsComponent::watchdogTimerCallback, this));
+
     RCLCPP_INFO(this->get_logger(), "ColorPointsComponent initialized successfully");
     RCLCPP_INFO(this->get_logger(), "Output topic: %s", general_config_.output_topic.c_str());
+    
+    bag_manager_ = nullptr;
+    flag_work = true;
+    sync_abnormal_ = false;
+    last_sync_time_ = this->now();
 
-    bag_manager_ = new BagManager(general_config_.bag_file_path, 10000);
 }
 
 ColorPointsComponent::~ColorPointsComponent()
 {
     RCLCPP_INFO(this->get_logger(), "Shutting down ColorPointsComponent");
-    delete bag_manager_;
+    if(bag_manager_!= nullptr)
+    {
+        delete bag_manager_;
+    }
+        
 }
 
 bool ColorPointsComponent::loadConfig(const std::string& config_file)
@@ -248,7 +270,8 @@ void ColorPointsComponent::initSubscribers()
         {
             // gnss_count++;
         // std::cout << "gnss time: " << msg->header.stamp.sec << "-" << msg->header.stamp.nanosec << std::endl;
-            bag_manager_->addMessage<sensor_msgs::msg::NavSatFix>(*msg, "/sensing/gnss/fix", msg->header.stamp);
+            if(bag_manager_!= nullptr && bag_recording_enabled_)
+                bag_manager_->addMessage<sensor_msgs::msg::NavSatFix>(*msg, "/sensing/gnss/fix", msg->header.stamp);
         });
 
     imu_sub_ = create_subscription<sensor_msgs::msg::Imu>(
@@ -257,7 +280,8 @@ void ColorPointsComponent::initSubscribers()
         {
         // std::cout << "imu time: " << msg->header.stamp.sec << "-" << msg->header.stamp.nanosec << std::endl;
             // imu_count++;
-            bag_manager_->addMessage<sensor_msgs::msg::Imu>(*msg, "/sensing/imu/imu_data", msg->header.stamp);
+            if(bag_manager_!= nullptr && bag_recording_enabled_)
+                bag_manager_->addMessage<sensor_msgs::msg::Imu>(*msg, "/sensing/imu/imu_data", msg->header.stamp);
         });
 }
 
@@ -308,6 +332,19 @@ void ColorPointsComponent::syncCallback(const PointCloud2::ConstSharedPtr& cloud
                   const Image::ConstSharedPtr& image1_msg, 
                   const Image::ConstSharedPtr& image2_msg)
 {
+    last_sync_time_ = this->now();
+    if (sync_abnormal_) {
+        RCLCPP_INFO(this->get_logger(), "Sync callback initialized/recovered! Receiving synchronized messages normally.");
+        sync_abnormal_ = false;
+    }
+    
+    if (!flag_work)
+    {
+        // 如果不进行点云生成，不丢弃必要步骤，但跳过昂贵的着色和发布操作
+        // 如果仍需要录制原始数据，可在这里单独录制然后返回
+        return;
+    }
+    
     // auto rosmsg_start = std::chrono::high_resolution_clock::now();
     // points_count++;
 
@@ -439,7 +476,7 @@ void ColorPointsComponent::syncCallback(const PointCloud2::ConstSharedPtr& cloud
     
     // 优化4: 并行处理图像
     std::vector<cv::Mat> images(2);
-    #if 0
+    #if 1
         #pragma omp parallel sections
         {
             #pragma omp section
@@ -471,15 +508,16 @@ void ColorPointsComponent::syncCallback(const PointCloud2::ConstSharedPtr& cloud
     colored_cloud_pub_->publish(colored_cloud_msg);
     
     // 写入Bag文件
-    bag_manager_->addMessage<sensor_msgs::msg::PointCloud2>(
-        colored_cloud_msg,
-        "/sensing/lidar/points_rgb",
-        msg_header.stamp
-    );
+    if(bag_manager_!= nullptr && bag_recording_enabled_)
+        bag_manager_->addMessage<sensor_msgs::msg::PointCloud2>(
+            colored_cloud_msg,
+            "/sensing/lidar/points_rgb",
+            msg_header.stamp
+        );
     // auto color_end = std::chrono::high_resolution_clock::now();
     // std::cout << "time_trans: " << std::chrono::duration_cast<std::chrono::milliseconds>(rosmsg_2 - rosmsg_start).count() << "ms " << 
     // "time_undistort: " << std::chrono::duration_cast<std::chrono::milliseconds>(rosmsg_3 - rosmsg_2).count() << "ms " << 
-    // "time_color: " << std::chrono::duration_cast<std::chrono::milliseconds>(color_end - rosmsg_3).count() << "ms " << 
+    // "time_color: " << std::chrono::duration_cast<std::chrono::milliseconds>(color_end - rosmsg_3).count() << "ms " <<std::endl; 
     // " points count: " << points_count <<" imu count: " << imu_count << " gnss count: " << gnss_count << std::endl;
 }
 
@@ -489,20 +527,152 @@ void ColorPointsComponent::handleBagControl(const std::shared_ptr<std_srvs::srv:
         std::string command = request->data ? "start" : "stop";
         RCLCPP_INFO(this->get_logger(), "Received bag control command: %s", command.c_str());
         
-        bool bag_recording_enabled_ = request->data;
+        bool enabled_ = request->data;
         
-        if (bag_recording_enabled_) {
+        if (enabled_) 
+        {
             response->message = "Bag recording started successfully";
-            bag_manager_->start_record();
-            RCLCPP_INFO(this->get_logger(), "Bag recording enabled");
-        } else {
-            response->message = "Bag recording stopped successfully";
-            bag_manager_->stop_record();
-            RCLCPP_INFO(this->get_logger(), "Bag recording disabled");
+            if(bag_manager_ == nullptr) 
+            {
+                bag_manager_ = new BagManager(general_config_.bag_file_path, 10000);
+            }
+            if(bag_manager_!= nullptr)
+            {
+                bag_manager_->start_record();
+                bag_recording_enabled_ = true;
+
+                RCLCPP_INFO(this->get_logger(), "Bag recording enabled");
+            }
+            
+        } else 
+        {
+            if(bag_manager_!= nullptr)
+            {
+                response->message = "Bag recording stopped successfully";
+                bag_manager_->stop_record();
+                bag_recording_enabled_ = false;
+                RCLCPP_INFO(this->get_logger(), "Bag recording disabled");
+            }
+            
         }
         
         response->success = true;
     }
+
+std::string ColorPointsComponent::handleTcpRequest(const std::string& request)
+{
+    // 清理字符串，去掉末尾可能带有的换行符、回车或空格
+    std::string cmd = request;
+    while (!cmd.empty() && (cmd.back() == '\n' || cmd.back() == '\r' || cmd.back() == ' ')) {
+        cmd.pop_back();
+    }
+    
+    RCLCPP_INFO(this->get_logger(), "TCP received command: [%s]", cmd.c_str());
+
+    if (cmd == "start_bag") 
+    {
+        if (bag_recording_enabled_) {
+            return "INFO: Bag recording is already running\n";
+        }
+        
+        // 与 service 行为保持一致，如果还没实例化就去实例化，并确保调用 start_record();
+        if (bag_manager_ == nullptr) {
+            bag_manager_ = new BagManager(general_config_.bag_file_path, 10000);
+        }
+        
+        if (bag_manager_ != nullptr) {
+            bag_manager_->start_record();
+            bag_recording_enabled_ = true;
+            RCLCPP_INFO(this->get_logger(), "Bag recording enabled via TCP");
+            return "SUCCESS: Bag recording started\n";
+        }
+        return "ERROR: Failed to initialize BagManager\n";
+    } 
+    else if (cmd == "stop_bag") 
+    {
+        if (!bag_recording_enabled_) {
+            return "INFO: Bag recording is already stopped\n";
+        }
+        
+        if (bag_manager_ != nullptr) {
+            bag_manager_->stop_record();
+        }
+        bag_recording_enabled_ = false;
+        RCLCPP_INFO(this->get_logger(), "Bag recording disabled via TCP");
+        return "SUCCESS: Bag recording stopped\n";
+    } 
+    else if (cmd == "start_docker")
+    {
+        flag_work = true;
+        RCLCPP_INFO(this->get_logger(), "Received command to start Docker container");
+        
+        // 动态获取相对的 install share 路径
+        std::string pkg_share_dir = ament_index_cpp::get_package_share_directory("color_pointscloud");
+        std::string script_path = pkg_share_dir + "/script/start_docker_ros2.sh";
+
+        // 优雅地在后台线程中执行脚本，避免阻塞 TCP Server 线程
+        std::thread([script_path]() {
+            std::string exec_cmd = "bash " + script_path;
+            int ret = system(exec_cmd.c_str());
+            if (ret != 0) {
+                // 如果需要可以在这里做额外日志记录或状态更新
+            }
+        }).detach();
+        
+        return "SUCCESS: Start Docker script triggered in background\n";
+    }
+    else if (cmd == "stop_docker")
+    {
+        flag_work = false;
+        RCLCPP_INFO(this->get_logger(), "Received command to stop Docker container");
+        
+        std::string pkg_share_dir = ament_index_cpp::get_package_share_directory("color_pointscloud");
+        std::string script_path = pkg_share_dir + "/script/stop_docker_ros2.sh";
+
+        // 后台执行关闭脚本
+        std::thread([script_path]() {
+            std::string exec_cmd = "bash " + script_path;
+            int ret = system(exec_cmd.c_str());
+            if (ret != 0) {
+                // 错误处理
+            }
+        }).detach();
+        
+        return "SUCCESS: Stop Docker script triggered in background\n";
+    }
+    else if (cmd == "status") 
+    {
+        std::string current_status = bag_recording_enabled_ ? "recording" : "stopped";
+        std::string topic_status = sync_abnormal_ ? "error" : "ok";
+        return "STATUS: Bag is " + current_status + ", Topic is " + topic_status + "\n";
+    }
+
+    RCLCPP_WARN(this->get_logger(), "TCP received unknown command: %s", cmd.c_str());
+    return "ERROR: Unknown command. Supported commands: start_bag, stop_bag, status\n";
+}
+
+void ColorPointsComponent::watchdogTimerCallback()
+{
+    static bool first_timer_call = true;
+    if (first_timer_call) {
+        RCLCPP_INFO(this->get_logger(), "Watchdog timer is actively running...");
+        first_timer_call = false;
+    }
+
+    auto now = this->now();
+    double diff_seconds = (now - last_sync_time_).seconds();
+    
+    // 判断当前时间距离上次进入 syncCallback 是否超过了 0.5s
+    if (diff_seconds > 0.5) 
+    {
+        sync_abnormal_ = true;
+        // 使用节流打印，每隔 1000 毫秒（1秒）重复打印一次，不会因为刷屏造成卡顿
+        auto clock = this->get_clock();
+        RCLCPP_ERROR_THROTTLE(this->get_logger(), *clock, 1000, 
+            "SYNC ABNORMAL: No synchronized messages received for %.2f seconds! "
+            "Check if sensors are publishing or if timestamps are out of sync.", diff_seconds);
+    }
+}
 
 pcl::PointCloud<PointXYZRGBT>::Ptr ColorPointsComponent::colorPointCloud(
     const pcl::PointCloud<PointXYZRGBT>::Ptr& cloud, 
@@ -741,21 +911,21 @@ cv::Mat ColorPointsComponent::processJPEGImage(const Image::ConstSharedPtr& imag
         image = cv_ptr->image;
 
         // 检查是否需要构建映射表
-        if (!build_map_flag_[index]) {
-            build_map(index, image.size());
-            build_map_flag_[index] = true;
-        }
+        // if (!build_map_flag_[index]) {
+        //     build_map(index, image.size());
+        //     build_map_flag_[index] = true;
+        // }
         
-        cv::Mat undistorted = cv::Mat::zeros(image_size_cache_[index], image.type());
+        // cv::Mat undistorted = cv::Mat::zeros(image_size_cache_[index], image.type());
         
-        // 应用去畸变映射
-        cv::remap(image, undistorted, 
-                undistort_maps_[index].first, 
-                undistort_maps_[index].second,
-                cv::INTER_LINEAR, 
-                cv::BORDER_CONSTANT);
+        // // 应用去畸变映射
+        // cv::remap(image, undistorted, 
+        //         undistort_maps_[index].first, 
+        //         undistort_maps_[index].second,
+        //         cv::INTER_LINEAR, 
+        //         cv::BORDER_CONSTANT);
         
-        image = undistorted;
+        // image = undistorted;
     } catch (const cv_bridge::Exception& e) {
         RCLCPP_ERROR(this->get_logger(), "CV Bridge error processing image %zu: %s", index, e.what());
     } catch (const cv::Exception& e) {
@@ -766,21 +936,21 @@ cv::Mat ColorPointsComponent::processJPEGImage(const Image::ConstSharedPtr& imag
     return image;
 }
 
-cv::Mat ColorPointsComponent::processRGBAImage(const Image::ConstSharedPtr& image_msg)
-{
-    cv_bridge::CvImageConstPtr cv_ptr;
-     // 1. 如果本身就是 bgr8，直接返回（零拷贝）
-    if (image_msg->encoding == "bgr8" || image_msg->encoding == "rgb8") 
-    {
-        cv_ptr = cv_bridge::toCvShare(image_msg, "bgr8");
-        return cv_ptr->image.clone();
-    }
-    else 
-    {
-        RCLCPP_ERROR(this->get_logger(), "Unsupported image encoding: %s", image_msg->encoding.c_str());
-    }
-    return cv::Mat();
-}
+// cv::Mat ColorPointsComponent::processRGBAImage(const Image::ConstSharedPtr& image_msg)
+// {
+//     cv_bridge::CvImageConstPtr cv_ptr;
+//      // 1. 如果本身就是 bgr8，直接返回（零拷贝）
+//     if (image_msg->encoding == "bgr8" || image_msg->encoding == "rgb8") 
+//     {
+//         cv_ptr = cv_bridge::toCvShare(image_msg, "bgr8");
+//         return cv_ptr->image.clone();
+//     }
+//     else 
+//     {
+//         RCLCPP_ERROR(this->get_logger(), "Unsupported image encoding: %s", image_msg->encoding.c_str());
+//     }
+//     return cv::Mat();
+// }
 
 
 } // namespace color_pointscloud

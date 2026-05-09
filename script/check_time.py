@@ -6,7 +6,7 @@ ROS 2 Humble – 多话题监听 + 1 Hz 表格输出（清屏版，修复 GNSS/I
 import rclpy
 from rclpy.node import Node
 from rclpy.time import Time, Duration
-from sensor_msgs.msg import PointCloud2, Image, NavSatFix, Imu
+from sensor_msgs.msg import PointCloud2, Image, NavSatFix, Imu, CompressedImage
 from collections import deque
 import threading
 import time
@@ -41,8 +41,10 @@ class MultiSubTableNode(Node):
         topic_map = {
             "/sensing/lidar/front_top/points": PointCloud2,
             "/sensing/lidar/rear_top/points": PointCloud2,
-            "/sensing/camera/rear/image_raw": Image,
-            "/sensing/camera/rear_3mm/image_raw": Image,
+            #"/sensing/camera/rear/image_raw": Image,
+            #"/sensing/camera/rear_3mm/image_raw": Image,
+            "/electronic_rearview_mirror/front_3mm/camera_image_jpeg": CompressedImage,
+            "/electronic_rearview_mirror/rear_3mm/camera_image_jpeg": CompressedImage,
             "/sensing/gnss/fix": NavSatFix,
             "/sensing/imu/imu_data": Imu,
         }

@@ -14,6 +14,7 @@
 #include <rclcpp_components/register_node_macro.hpp>
 #include <sensor_msgs/msg/point_cloud2.hpp>
 #include <sensor_msgs/msg/image.hpp>
+#include <sensor_msgs/msg/compressed_image.hpp>
 #include <sensor_msgs/msg/imu.hpp>
 #include "sensor_msgs/msg/nav_sat_fix.hpp"
 #include <pcl_conversions/pcl_conversions.h>
@@ -37,10 +38,11 @@
 #include <std_srvs/srv/set_bool.hpp>
 
 #include "bag_manager.hpp"
+#include "tcp_server.hpp"
 
 using PointCloud2 = sensor_msgs::msg::PointCloud2;
-using Image = sensor_msgs::msg::Image;
-// using Image = sensor_msgs::msg::CompressedImage;
+// using Image = sensor_msgs::msg::Image;
+using Image = sensor_msgs::msg::CompressedImage;
 using namespace std::chrono_literals;
 
 namespace color_pointscloud
@@ -107,9 +109,7 @@ public:
 
 private:
     BagManager *bag_manager_;
-    // size_t gnss_count = 0;
-    // size_t imu_count = 0;
-    // size_t points_count = 0;
+    std::atomic<bool> bag_recording_enabled_{false};
 
     std::vector<std::pair<cv::Mat, cv::Mat>> undistort_maps_;
     std::vector<cv::Size> image_size_cache_;
@@ -140,10 +140,17 @@ private:
     std::shared_ptr<tf2_ros::TransformListener> tf_listener_;
     rclcpp::Service<std_srvs::srv::SetBool>::SharedPtr bag_control_service_;
 
+    // 看门狗相关：检查同步回调状态
+    rclcpp::TimerBase::SharedPtr watchdog_timer_;
+    rclcpp::Time last_sync_time_;
+    std::atomic<bool> sync_abnormal_{true};
+    std::atomic<bool> flag_work{false}; //用于控制是否进行rgb点云生成，以节省资源，默认不生成
+
     using SyncPolicy = message_filters::sync_policies::ApproximateTime<
         PointCloud2, PointCloud2, Image, Image>;
     std::shared_ptr<message_filters::Synchronizer<SyncPolicy>> sync_;
 
+    std::unique_ptr<TcpServer> tcp_server_;
 
     void build_map(const int index, const cv::Size& img_size);
     bool loadConfig(const std::string& config_file);
@@ -160,6 +167,8 @@ private:
                   const Image::ConstSharedPtr& image2_msg);
     void handleBagControl(const std::shared_ptr<std_srvs::srv::SetBool::Request> request,
                        const std::shared_ptr<std_srvs::srv::SetBool::Response> response);
+    std::string handleTcpRequest(const std::string& request);
+    void watchdogTimerCallback();
 };
 
 } // namespace color_pointscloud

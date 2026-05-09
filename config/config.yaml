@@ -4,8 +4,8 @@ general:
   max_time_diff: 0.06  # 同步数据允许的最大时间差（秒）
   use_tf: false
   output_topic: "/colored_pointcloud"  # 合并后的输出话题
-  bag_file_path: "/home/nvidia/gaolf_test/color_points"  # 输出的bag文件路径
-  params_file_path: "/home/nvidia/pix/parameter/sensor_kit/robobus_sensor_kit_description"
+  bag_file_path: "/home/ipc/pix/robobus_mapping_web/uploads"  # 输出的bag文件路径
+  params_file_path: "/home/ipc/pix/parameter/sensor_kit/robobus_sensor_kit_description"
 
 # 73th
 # tf2 lidar -> base_link 点云话题配置
@@ -24,7 +24,7 @@ pointcloud_topics:
 
 # tf2 base_link -> camera 图像话题配置
 image_topics:
-  - topic: "/sensing/camera/rear/image_raw"
+  - topic: "/electronic_rearview_mirror/front_3mm/camera_image_jpeg"
     name: "camera1_params"
     frame_id: "camera1/camera_link"
     # intrinsic_params:
@@ -37,7 +37,7 @@ image_topics:
     #   rotation: [0.013750320293374863, -0.9997460692915707, -0.017852888502534747, 0.01202658809079793, 0.01801864366354544, -0.9997653172917237, 0.9998331310127327, 0.013532383994718011, 0.012271296292389655]
     #   translation: [-0.079, 0.712, -3.350]
       
-  - topic: "/sensing/camera/rear_3mm/image_raw"
+  - topic: "/electronic_rearview_mirror/rear_3mm/camera_image_jpeg"
     name: "camera2_params"
     frame_id: "camera2/camera_link"
     # intrinsic_params:
