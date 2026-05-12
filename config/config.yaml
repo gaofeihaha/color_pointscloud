@@ -3,8 +3,8 @@ general:
   image_queue_size: 100
   max_time_diff: 0.06  # 同步数据允许的最大时间差（秒）
   use_tf: false
-  output_topic: "/colored_pointcloud"  # 合并后的输出话题
-  bag_file_path: "/home/ipc/pix/robobus_mapping_web/uploads"  # 输出的bag文件路径
+  output_topic: "/sensing/lidar/points_rgb"  # 合并后的输出话题
+  bag_file_path: "/home/ipc/pix/robobus_mapping_web/rosbag2"  # 输出的bag文件路径
   params_file_path: "/home/ipc/pix/parameter/sensor_kit/robobus_sensor_kit_description"
 
 # 73th

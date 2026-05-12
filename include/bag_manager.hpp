@@ -53,7 +53,8 @@ public:
     writer_ = std::make_unique<rosbag2_cpp::Writer>();
     rosbag2_storage::StorageOptions sopt;
     sopt.uri = bag_file_name_;
-    sopt.storage_id = "sqlite3";
+    sopt.storage_id = "mcap";
+    sopt.storage_preset_profile = "zstd_fast"; // 开启 zstd 压缩
 
     rosbag2_cpp::ConverterOptions copt;
     copt.input_serialization_format = "cdr";

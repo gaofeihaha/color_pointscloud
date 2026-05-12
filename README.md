@@ -57,7 +57,7 @@ general:
   image_queue_size: 100        # 图像队列大小
   max_time_diff: 0.06          # 同步数据允许的最大时间差（秒）
   use_tf: false               # 是否使用TF2坐标变换
-  output_topic: "/colored_pointcloud"  # 输出话题
+  output_topic: "/sensing/lidar/points_rgb"  # 输出话题
 ```
 
 #### 点云配置
@@ -75,12 +75,20 @@ general:
 ros2 launch color_pointscloud color_points.launch.py
 ```
 
-### 2. 手动启动节点
+### 2. 通过tcp进行录包控制
+
+- **启动录制**: `echo -n "start_bag" | nc -w 1 127.0.0.1 8888`
+
+- **停止录制**: `echo -n "stop_bag" | nc -w 1 127.0.0.1 8888`
+
+- **查询状态**: `echo -n "status" | nc -w 1 127.0.0.1 8888`
+
+### 3. 手动启动节点
 ```bash
 ros2 run color_pointscloud color_pointscloud_node --ros-args -p config_file:=/path/to/config.yaml
 ```
 
-### 3. 参数说明
+### 4. 参数说明
 - `config_file`: 配置文件路径（必需）
 
 ## 话题
