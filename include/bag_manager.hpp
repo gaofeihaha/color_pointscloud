@@ -23,19 +23,21 @@
 class BagManager
 {
 public:
-  explicit BagManager(const std::string & bag_file_path, size_t max_queue_size = 10000)
+  explicit BagManager(const std::string & bag_file_path, size_t max_queue_size = 10000, const std::string & folder_name = "")
     : bag_file_name_(bag_file_path)
     , max_queue_size_(max_queue_size)
     , stop_requested_(false)
     , message_count_(0)
     , written_count_(0)
   {
-    // 1. 构造时间戳子目录名：20251012_103012
-    auto now = std::chrono::system_clock::now();
-    auto time_t = std::chrono::system_clock::to_time_t(now);
-    std::stringstream ss;
-    ss << std::put_time(std::localtime(&time_t), "%Y%m%d_%H%M%S");
-    std::string time_folder = ss.str();
+    std::string time_folder = folder_name;
+    if (time_folder.empty()) {
+      auto now = std::chrono::system_clock::now();
+      auto time_t = std::chrono::system_clock::to_time_t(now);
+      std::stringstream ss;
+      ss << std::put_time(std::localtime(&time_t), "%Y%m%d_%H%M%S");
+      time_folder = ss.str();
+    }
 
     // 2. 组合最终路径：bag_file_path / 20251012_103012
     rcpputils::fs::path root(bag_file_path);

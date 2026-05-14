@@ -41,8 +41,6 @@ class MultiSubTableNode(Node):
         topic_map = {
             "/sensing/lidar/front_top/points": PointCloud2,
             "/sensing/lidar/rear_top/points": PointCloud2,
-            #"/sensing/camera/rear/image_raw": Image,
-            #"/sensing/camera/rear_3mm/image_raw": Image,
             "/electronic_rearview_mirror/front_3mm/camera_image_jpeg": CompressedImage,
             "/electronic_rearview_mirror/rear_3mm/camera_image_jpeg": CompressedImage,
             "/sensing/gnss/fix": NavSatFix,

@@ -200,6 +200,25 @@ bool ColorPointsComponent::loadConfig(const std::string& config_file)
             image_configs_.push_back(config);
         }
         
+        // 预计算外参矩阵元素
+        if (pointcloud_configs_.size() >= 2) {
+            const auto& Rf = pointcloud_configs_[0].extrinsic.rotation;
+            const auto& Tf = pointcloud_configs_[0].extrinsic.translation;
+            const auto& Rr = pointcloud_configs_[1].extrinsic.rotation;
+            const auto& Tr = pointcloud_configs_[1].extrinsic.translation;
+            
+            Rf00 = Rf(0,0); Rf01 = Rf(0,1); Rf02 = Rf(0,2);
+            Rf10 = Rf(1,0); Rf11 = Rf(1,1); Rf12 = Rf(1,2);
+            Rf20 = Rf(2,0); Rf21 = Rf(2,1); Rf22 = Rf(2,2);
+            
+            Rr00 = Rr(0,0); Rr01 = Rr(0,1); Rr02 = Rr(0,2);
+            Rr10 = Rr(1,0); Rr11 = Rr(1,1); Rr12 = Rr(1,2);
+            Rr20 = Rr(2,0); Rr21 = Rr(2,1); Rr22 = Rr(2,2);
+            
+            Tfx = Tf.x(); Tfy = Tf.y(); Tfz = Tf.z();
+            Trx = Tr.x(); Try = Tr.y(); Trz = Tr.z();
+        }
+        
         printConfigSummary();
         return true;
         
@@ -378,27 +397,6 @@ void ColorPointsComponent::syncCallback(const PointCloud2::ConstSharedPtr& cloud
         auto cloud_conc = std::make_shared<pcl::PointCloud<PointXYZRGBT>>();
         cloud_conc->resize(total_size);
         
-        // 获取外参
-        const PointCloudConfig& config_front = pointcloud_configs_[0];
-        const PointCloudConfig& config_rear = pointcloud_configs_[1];
-        
-        const Eigen::Matrix3f& Rf = config_front.extrinsic.rotation;
-        const Eigen::Vector3f& Tf = config_front.extrinsic.translation;
-        const Eigen::Matrix3f& Rr = config_rear.extrinsic.rotation;
-        const Eigen::Vector3f& Tr = config_rear.extrinsic.translation;
-        
-        // 预计算矩阵元素
-        const float Rf00 = Rf(0,0), Rf01 = Rf(0,1), Rf02 = Rf(0,2);
-        const float Rf10 = Rf(1,0), Rf11 = Rf(1,1), Rf12 = Rf(1,2);
-        const float Rf20 = Rf(2,0), Rf21 = Rf(2,1), Rf22 = Rf(2,2);
-        
-        const float Rr00 = Rr(0,0), Rr01 = Rr(0,1), Rr02 = Rr(0,2);
-        const float Rr10 = Rr(1,0), Rr11 = Rr(1,1), Rr12 = Rr(1,2);
-        const float Rr20 = Rr(2,0), Rr21 = Rr(2,1), Rr22 = Rr(2,2);
-        
-        const float Tfx = Tf.x(), Tfy = Tf.y(), Tfz = Tf.z();
-        const float Trx = Tr.x(), Try = Tr.y(), Trz = Tr.z();
-        
         // 获取点云字段信息
         auto getFieldOffset = [](const sensor_msgs::msg::PointCloud2& cloud, 
                                 const std::string& field_name) -> int {
@@ -532,10 +530,12 @@ void ColorPointsComponent::handleBagControl(const std::shared_ptr<std_srvs::srv:
         if (enabled_) 
         {
             response->message = "Bag recording started successfully";
-            if(bag_manager_ == nullptr) 
-            {
-                bag_manager_ = new BagManager(general_config_.bag_file_path, 10000);
+            if (bag_manager_ != nullptr) {
+                delete bag_manager_;
+                bag_manager_ = nullptr;
             }
+            bag_manager_ = new BagManager(general_config_.bag_file_path, 10000, "");
+            
             if(bag_manager_!= nullptr)
             {
                 bag_manager_->start_record();
@@ -562,12 +562,22 @@ void ColorPointsComponent::handleBagControl(const std::shared_ptr<std_srvs::srv:
 std::string ColorPointsComponent::handleTcpRequest(const std::string& request)
 {
     // 清理字符串，去掉末尾可能带有的换行符、回车或空格
-    std::string cmd = request;
-    while (!cmd.empty() && (cmd.back() == '\n' || cmd.back() == '\r' || cmd.back() == ' ')) {
-        cmd.pop_back();
+    std::string clean_request = request;
+    while (!clean_request.empty() && (clean_request.back() == '\n' || clean_request.back() == '\r' || clean_request.back() == ' ')) {
+        clean_request.pop_back();
+    }
+
+    std::string cmd;
+    std::string params;
+    size_t hash_pos = clean_request.find('#');
+    if (hash_pos != std::string::npos) {
+        cmd = clean_request.substr(0, hash_pos);
+        params = clean_request.substr(hash_pos + 1);
+    } else {
+        cmd = clean_request;
     }
     
-    RCLCPP_INFO(this->get_logger(), "TCP received command: [%s]", cmd.c_str());
+    RCLCPP_INFO(this->get_logger(), "TCP received command: [%s], params: [%s]", cmd.c_str(), params.c_str());
 
     if (cmd == "start_bag") 
     {
@@ -576,9 +586,11 @@ std::string ColorPointsComponent::handleTcpRequest(const std::string& request)
         }
         
         // 与 service 行为保持一致，如果还没实例化就去实例化，并确保调用 start_record();
-        if (bag_manager_ == nullptr) {
-            bag_manager_ = new BagManager(general_config_.bag_file_path, 10000);
+        if (bag_manager_ != nullptr) {
+            delete bag_manager_;
+            bag_manager_ = nullptr;
         }
+        bag_manager_ = new BagManager(general_config_.bag_file_path, 10000, params);
         
         if (bag_manager_ != nullptr) {
             bag_manager_->start_record();

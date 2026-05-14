@@ -128,6 +128,12 @@ private:
     std::vector<PointCloudConfig> pointcloud_configs_;
     std::vector<ImageConfig> image_configs_;
 
+    // 预计算的外参矩阵元素
+    float Rf00{1}, Rf01{0}, Rf02{0}, Rf10{0}, Rf11{1}, Rf12{0}, Rf20{0}, Rf21{0}, Rf22{1};
+    float Tfx{0}, Tfy{0}, Tfz{0};
+    float Rr00{1}, Rr01{0}, Rr02{0}, Rr10{0}, Rr11{1}, Rr12{0}, Rr20{0}, Rr21{0}, Rr22{1};
+    float Trx{0}, Try{0}, Trz{0};
+
     // ROS2相关
     rclcpp::Publisher<PointCloud2>::SharedPtr colored_cloud_pub_;
     std::vector<std::shared_ptr<message_filters::Subscriber<PointCloud2>>> cloud_subs_;
